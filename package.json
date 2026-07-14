@@ -1,0 +1,37 @@
+{
+    "name": "pi-alternative-compositor",
+    "version": "1.0.0",
+    "description": "Scrollable chat viewport compositor with mouse selection and keyboard scrolling for pi.",
+    "type": "module",
+    "scripts": {
+        "test": "vitest run --config tests/vitest.config.ts"
+    },
+    "files": [
+        "src/**/*.ts",
+        "README.md"
+    ],
+    "keywords": [
+        "pi-package",
+        "pi",
+        "coding-agent",
+        "extension",
+        "compositor",
+        "scroll",
+        "tui"
+    ],
+    "peerDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.80.0",
+        "@earendil-works/pi-tui": ">=0.80.0"
+    },
+    "devDependencies": {
+        "@earendil-works/pi-coding-agent": ">=0.80.0",
+        "@earendil-works/pi-tui": ">=0.80.0",
+        "@types/node": "^26.1.0",
+        "vitest": "^4.1.10"
+    },
+    "pi": {
+        "extensions": [
+            "./src/index.ts"
+        ]
+    }
+}
