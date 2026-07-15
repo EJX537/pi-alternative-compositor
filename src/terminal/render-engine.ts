@@ -449,7 +449,8 @@ export class RenderEngine {
 
         let buffer =
             beginSynchronizedOutput() +
-            disableAutoWrap();
+            disableAutoWrap() +
+            setScrollRegion(1, scrollableRows);
 
         for (let row = 0; row < scrollableRows; row++) {
             if (row > 0) buffer += "\r\n";

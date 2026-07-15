@@ -16,6 +16,8 @@ import {
     enableAutoWrap,
     enableMouseReporting,
     disableMouseReporting,
+    enableBracketedPaste,
+    disableBracketedPaste,
     enableExtendedKeyboardMode,
     disableExtendedKeyboardMode,
     resetExtendedKeyboardModes,
@@ -104,6 +106,16 @@ describe("escape sequences", () => {
             expect(disableMouseReporting()).toBe(
                 "\x1b[?1006l\x1b[?1002l\x1b[?1003l\x1b[?1000l",
             );
+        });
+    });
+
+    describe("bracketed paste", () => {
+        it("enableBracketedPaste", () => {
+            expect(enableBracketedPaste()).toBe("\x1b[?2004h");
+        });
+
+        it("disableBracketedPaste", () => {
+            expect(disableBracketedPaste()).toBe("\x1b[?2004l");
         });
     });
 

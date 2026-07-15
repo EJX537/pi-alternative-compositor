@@ -6,6 +6,7 @@ import {
     disableFocusEvents,
     disableMouseReporting,
     enableAlternateScrollMode,
+    enableBracketedPaste,
     enableExtendedKeyboardMode,
     enableMouseReporting,
     endSynchronizedOutput,
@@ -112,7 +113,7 @@ export class TerminalModeManager {
             this.enableAlternateScreenKeyboardMode() +
             disableAlternateScrollMode() +
             disableFocusEvents() +
-            disableBracketedPaste() +
+            enableBracketedPaste() +
             this.mouseReportingStateGuard() +
             endSynchronizedOutput()
         );
@@ -159,6 +160,7 @@ export class TerminalModeManager {
             resetScrollRegion() +
             (this.mouseScroll ? disableMouseReporting() : "") +
             (activeMode ? disableExtendedKeyboardMode(activeMode) : "") +
+            disableBracketedPaste() +
             enableAlternateScrollMode() +
             (options.exitAlternateScreen !== false
                 ? (setAlternateScreenActive(false), exitAlternateScreen())

@@ -10,28 +10,25 @@ describe("renderFixedEditorCluster", () => {
         editorLines: ["editor line 1", "editor line 2"],
     };
 
-    it("renders editor lines with padding above and below", () => {
+    it("renders editor lines without extra padding", () => {
         const result = renderFixedEditorCluster(baseInput);
 
-        // 2 editor lines + 1 padding above + 1 padding below = 4
-        // terminalRows=20 → maxRows=19 → plenty of room
-        expect(result.lines.length).toBeGreaterThanOrEqual(4);
+        // Only the actual editor content is included; no padding that would
+        // steal space from the scrollable chat log.
+        expect(result.lines.length).toBe(2);
         expect(result.lines).toContain("editor line 1");
         expect(result.lines).toContain("editor line 2");
     });
 
-    it("pads with empty lines above and below the editor", () => {
+    it("does not add padding above and below the editor", () => {
         const result = renderFixedEditorCluster(baseInput);
 
         // Find where editor lines are
         const editorIndex1 = result.lines.indexOf("editor line 1");
         const editorIndex2 = result.lines.indexOf("editor line 2");
 
-        expect(editorIndex1).toBeGreaterThanOrEqual(0);
+        expect(editorIndex1).toBe(0);
         expect(editorIndex2).toBe(editorIndex1 + 1);
-
-        // There should be a padding row above editor line 1
-        expect(result.lines[editorIndex1 - 1]).toBe(" ".repeat(40));
     });
 
     it("caps editor lines to available rows", () => {
@@ -176,7 +173,7 @@ describe("renderFixedEditorCluster", () => {
         expect(result.cursor).toBeNull();
     });
 
-    it("fills remaining space with empty lines when editor is small", () => {
+    it("keeps the cluster compact when editor is small", () => {
         const input: FixedEditorClusterInput = {
             width: 40,
             terminalRows: 5,
@@ -185,8 +182,9 @@ describe("renderFixedEditorCluster", () => {
 
         const result = renderFixedEditorCluster(input);
 
-        // maxRows = 4: 1 editor + 1 pad above + 1 pad below + ? = 3 minimum
-        expect(result.lines.length).toBe(3);
+        // Only the actual editor line is included; leftover rows belong to the
+        // scrollable chat log, not to empty cluster padding.
+        expect(result.lines.length).toBe(1);
     });
 
     it("does not crash on huge terminalRows", () => {

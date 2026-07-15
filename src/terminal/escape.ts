@@ -101,6 +101,10 @@ export function disableFocusEvents(): string {
 
 // ── Bracketed paste ──────────────────────────────────────────
 
+export function enableBracketedPaste(): string {
+    return "\x1b[?2004h";
+}
+
 export function disableBracketedPaste(): string {
     return "\x1b[?2004l";
 }

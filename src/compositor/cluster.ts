@@ -64,13 +64,13 @@ export function renderFixedEditorCluster(input: FixedEditorClusterInput): FixedE
         capEditorLines(input.editorLines ?? [], maxRows),
         width,
     );
-    let remaining = maxRows - editorLines.length;
-    const emptyLine = " ".repeat(width);
-    const paddingAbove = remaining > 0 ? [emptyLine] : []; remaining -= paddingAbove.length;
-    const paddingBelow = remaining > 0 ? [emptyLine] : []; remaining -= paddingBelow.length;
-    const footer = takeTail(footerLines, remaining); remaining -= footer.length;
-    const belowWidgets = takeTail(belowWidgetLines, remaining); remaining -= belowWidgets.length;
+    // The fixed cluster should only take the space its content actually
+    // needs. Filling the remaining terminal height with padding pushes the
+    // scrollable chat log off the screen.
+    const status = takeTail(statusLines, maxRows);
+    let remaining = maxRows - editorLines.length - status.length;
     const aboveWidgets = takeTail(aboveWidgetLines, remaining); remaining -= aboveWidgets.length;
-    const status = takeTail(statusLines, remaining);
-    return extractCursor([...status, ...aboveWidgets, ...paddingAbove, ...editorLines, ...paddingBelow, ...belowWidgets, ...footer]);
+    const belowWidgets = takeTail(belowWidgetLines, remaining); remaining -= belowWidgets.length;
+    const footer = takeTail(footerLines, remaining);
+    return extractCursor([...status, ...aboveWidgets, ...editorLines, ...belowWidgets, ...footer]);
 }
