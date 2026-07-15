@@ -274,6 +274,10 @@ export class TerminalSplitCompositor {
         return this.selectionManager.isDragging;
     }
 
+    setClusterStartIndex(index: number): void {
+        this.renderEngine.setClusterStartIndex(index);
+    }
+
     private handleMousePacket(packet: SgrMousePacket): void {
         this.mouseHandler.handleMousePacket(
             packet,

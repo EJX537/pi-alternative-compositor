@@ -74,6 +74,16 @@ export class RenderEngine {
     private renderingCluster = false;
     private renderingScrollableRoot = false;
     private checkingOverlay = false;
+    /**
+     * Index in `tui.children` where the fixed-cluster region begins.
+     * Children at or above this index are part of the cluster (editor, above/below
+     * widgets, footer) and are excluded from root rendering.  Using an index
+     * boundary instead of per-instance hideRenderable patching means that
+     * dynamically replaced children (e.g. pi-input-revamp&#39;s setFooter which
+     * removes the old footer and appends a new one) are automatically excluded
+     * from the root without needing to re-patch new instances.
+     */
+    private clusterStartIndex: number = Infinity;
     private scrollOffset = 0;
     private maxScrollOffset = 0;
     private lastRootLineCount = 0;
@@ -122,6 +132,16 @@ export class RenderEngine {
     }
 
     // ── Accessors for controller ────────────────────────────
+
+    /**
+     * Set the index boundary between scrollable root children and fixed-cluster
+     * children in `tui.children`.  Children at `index` and above are excluded
+     * from root rendering and expected to be rendered by the `renderCluster`
+     * callback instead.
+     */
+    setClusterStartIndex(index: number): void {
+        this.clusterStartIndex = index;
+    }
 
     get currentScrollOffset(): number {
         return this.scrollOffset;
@@ -240,6 +260,14 @@ export class RenderEngine {
 
     // ── Rendering pipeline ───────────────────────────────────
 
+    /**
+     * Return the subset of `tui.children` that belongs to the scrollable root
+     * (everything before the fixed-cluster region).
+     */
+    private getRootChildren(): readonly unknown[] {
+        return this.tui.children.slice(0, this.clusterStartIndex);
+    }
+
     refreshRootWindow(width: number): number {
         if (!this.originalRender) return this.updateVisibleRootWindow();
 
@@ -250,7 +278,8 @@ export class RenderEngine {
         const previousVisibleRootStart = this.visibleRootStart;
         const previousVisibleScrollableRows = this.visibleScrollableRows;
 
-        const anchor = this.captureRootViewportAnchor();
+        const rootChildren = this.getRootChildren();
+        const anchor = this.captureRootViewportAnchor(rootChildren);
         this.collapseState.reconcile(this.tui.children);
 
         // A collapse toggle can change a nested component's size without the
@@ -262,7 +291,7 @@ export class RenderEngine {
         }
 
         const { lines } = this.childRenderCache.render(
-            this.tui.children,
+            rootChildren,
             renderWidth,
             this.collapseState,
             this.rangeMapper,
@@ -272,6 +301,7 @@ export class RenderEngine {
             renderWidth,
             lines.length,
             scrollableRows,
+            rootChildren,
         );
 
         const collapseToggle = this.collapseState.consumeLastToggle();
@@ -537,6 +567,7 @@ export class RenderEngine {
         width: number,
         rootLineCount: number,
         scrollableRows: number,
+        rootChildren: readonly unknown[] = this.getRootChildren(),
     ): void {
         const visibleStart = Math.max(
             0,
@@ -547,7 +578,7 @@ export class RenderEngine {
             visibleStart + scrollableRows,
         );
         const ranges = this.rangeMapper.buildRanges(
-            this.tui.children,
+            rootChildren,
             width,
             visibleStart,
             visibleEnd,
@@ -569,13 +600,12 @@ export class RenderEngine {
      */
     refreshRootComponentRanges(): void {
         const width = this.getSidebarLayout().mainWidth;
-        const rawRows = this.getRawRows();
-        const cluster = this.getCluster(width, rawRows);
-        const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
+        const rootChildren = this.getRootChildren();
         this.updateRootComponentLineRanges(
             width,
             this.rootLines.length,
-            scrollableRows,
+            this.getScrollableRows(),
+            rootChildren,
         );
     }
 
@@ -601,7 +631,9 @@ export class RenderEngine {
 
     // ── Viewport anchor ─────────────────────────────────────
 
-    private captureRootViewportAnchor(): RootViewportAnchor | null {
+    private captureRootViewportAnchor(
+        rootChildren?: readonly unknown[],
+    ): RootViewportAnchor | null {
         if (this.scrollOffset === 0) return null;
 
         // Capture the outermost (root-level) component at the first visible line.
@@ -610,8 +642,9 @@ export class RenderEngine {
         // collapse/expand. Using the innermost child would be wrong because that
         // child (e.g. a tool output line) may disappear when its parent collapses,
         // leaving us without a valid anchor.
+        const children = rootChildren ?? this.getRootChildren();
         const rootComponents = new Set<object>(
-            this.tui.children.filter(
+            children.filter(
                 (c) => typeof c === "object" && c !== null,
             ) as object[],
         );

@@ -12,9 +12,6 @@ export class CompositorLifecycle {
     readonly sidebar = new SidebarState();
     private compositor: TerminalSplitCompositor | null = null;
     private installed = false;
-    private fixedEditorContainer: Component | null = null;
-    private fixedWidgetContainerAbove: Component | null = null;
-    private fixedWidgetContainerBelow: Component | null = null;
 
     requestRender = (): void => this.compositor?.requestRender();
 
@@ -32,9 +29,6 @@ export class CompositorLifecycle {
         resetSidebarRegistry();
         this.compositor = null;
         this.installed = false;
-        this.fixedEditorContainer = null;
-        this.fixedWidgetContainerAbove = null;
-        this.fixedWidgetContainerBelow = null;
         this.sidebar.visible = false;
     }
 
@@ -47,11 +41,14 @@ export class CompositorLifecycle {
         const editorMatch = findEditorContainer(tui);
         if (!editorMatch) return;
 
-        this.fixedWidgetContainerAbove =
-            (tui.children[editorMatch.index - 1] as Component | undefined) ?? null;
-        this.fixedEditorContainer = editorMatch.container;
-        this.fixedWidgetContainerBelow =
-            (tui.children[editorMatch.index + 1] as Component | undefined) ?? null;
+        // Collect ALL children from the above-widget through the end of the
+        // children list. In pi's default layout this spans:
+        //   widgetContainerAbove → editorContainer → widgetContainerBelow → footer
+        // and any other children extensions place around the editor.
+        // Previously only three immediate neighbors were captured, which missed
+        // the footer and caused it to render in the scrollable root above the
+        // editor instead of below it.
+        const clusterStartIndex = Math.max(0, editorMatch.index - 1);
 
         let nextCompositor: TerminalSplitCompositor;
         nextCompositor = new TerminalSplitCompositor({
@@ -60,38 +57,48 @@ export class CompositorLifecycle {
             onCopySelection: (text) => void copyToClipboard(text),
             sidebar: this.sidebar.createOptions(),
             getShowHardwareCursor: () => tui.getShowHardwareCursor(),
-            renderCluster: (width, terminalRows) =>
-                renderFixedEditorCluster({
+            renderCluster: (width, terminalRows) => {
+                // Slice dynamically from tui.children at render time so that
+                // components replaced after setup (e.g. pi-input-revamp&#39;s
+                // setFooter swapping the footer instance) are always included.
+                const clusterChildren = tui.children.slice(
+                    clusterStartIndex,
+                ) as Component[];
+                const editorSliceIndex = editorMatch.index - clusterStartIndex;
+                const editorContainer: Component | null =
+                    clusterChildren[editorSliceIndex] ?? null;
+                const aboveChildren = clusterChildren.slice(0, editorSliceIndex);
+                const belowChildren = clusterChildren.slice(
+                    editorSliceIndex + 1,
+                );
+                return renderFixedEditorCluster({
                     width,
                     terminalRows,
-                    aboveWidgetLines: renderHidden(
-                        nextCompositor,
-                        this.fixedWidgetContainerAbove,
-                        width,
+                    aboveWidgetLines: aboveChildren.flatMap((child) =>
+                        renderHidden(nextCompositor, child, width),
                     ),
                     editorLines: renderHidden(
                         nextCompositor,
-                        this.fixedEditorContainer,
+                        editorContainer,
                         width,
                     ),
-                    belowWidgetLines: renderHidden(
-                        nextCompositor,
-                        this.fixedWidgetContainerBelow,
-                        width,
+                    belowWidgetLines: belowChildren.flatMap((child) =>
+                        renderHidden(nextCompositor, child, width),
                     ),
-                }),
+                });
+            },
         });
 
         this.compositor = nextCompositor;
         // Keep the registry callback bound to this installed terminal instance.
         // It must not follow lifecycle state during session replacement.
         setSidebarRequestRender(() => nextCompositor.requestRender());
-        if (this.fixedWidgetContainerAbove)
-            nextCompositor.hideRenderable(this.fixedWidgetContainerAbove);
-        if (this.fixedEditorContainer)
-            nextCompositor.hideRenderable(this.fixedEditorContainer);
-        if (this.fixedWidgetContainerBelow)
-            nextCompositor.hideRenderable(this.fixedWidgetContainerBelow);
+
+        // Tell the render engine to exclude cluster children from root rendering
+        // by index range.  This is robust against component replacement: even if
+        // an extension replaces the footer instance, the new instance is still at
+        // or above clusterStartIndex and is automatically excluded.
+        nextCompositor.setClusterStartIndex(clusterStartIndex);
 
         try {
             nextCompositor.install();
