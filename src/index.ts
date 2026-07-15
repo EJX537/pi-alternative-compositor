@@ -23,7 +23,7 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
     pi.on("session_start", async (event, ctx) => {
         if (ctx.mode !== "tui") return;
 
-        lifecycle.sidebar.enabled = (await loadSettings()).enableSidebar;
+        lifecycle.sidebar.enabled = true; // updated from settings below
         lifecycle.sidebar.visible =
             event.reason !== "new" &&
             ctx.sessionManager.getBranch().some((entry) => entry.type === "message");
@@ -36,6 +36,14 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
             },
             { placement: "aboveEditor" },
         );
+
+        // Now load settings asynchronously — compositor is already installed.
+        const settings = await loadSettings();
+        if (lifecycle.sidebar.enabled !== settings.enableSidebar) {
+            lifecycle.sidebar.enabled = settings.enableSidebar;
+            if (!lifecycle.sidebar.enabled) lifecycle.sidebar.visible = false;
+            lifecycle.requestRender();
+        }
     });
 
     pi.on("agent_start", () => lifecycle.setSidebarVisible(true));
