@@ -280,6 +280,11 @@ export class RenderEngine {
 
         const rootChildren = this.getRootChildren();
         const anchor = this.captureRootViewportAnchor(rootChildren);
+
+        // Snapshot collapse state before reconciliation so we can detect
+        // Pi's native global collapse/expand toggle (keyboard shortcut) that
+        // bypasses our local toggle() method.
+        this.collapseState.snapshotCollapseState(this.tui.children);
         this.collapseState.reconcile(this.tui.children);
 
         // A collapse toggle can change a nested component's size without the
@@ -304,10 +309,33 @@ export class RenderEngine {
             rootChildren,
         );
 
+        // Save old component start lines before updating, so global toggle
+        // anchoring can look up where a component was before the toggle.
+        const oldComponentStarts = new Map<object, number>(
+            this.rootComponentLineRanges.map((r) => [
+                r.component as object,
+                r.startLine,
+            ]),
+        );
+
         const collapseToggle = this.collapseState.consumeLastToggle();
-        const collapseAnchorRange = collapseToggle
+
+        // If no local toggle was recorded, check for a global one (pi's native
+        // collapse/expand shortcut).  consumeGlobalToggle returns the first
+        // component whose collapse state differs from the pre-reconcile snapshot.
+        const globalToggle = collapseToggle
+            ? null
+            : this.collapseState.consumeGlobalToggle(this.tui.children);
+
+        // Build the anchor target: prefer the local/global toggled component.
+        const toggleTarget: {
+            component: object;
+            collapsed: boolean;
+        } | null = collapseToggle ?? globalToggle;
+        const collapseAnchorRange = toggleTarget
             ? this.rootComponentLineRanges.find(
-                  (candidate) => candidate.component === collapseToggle.component,
+                  (candidate) =>
+                      candidate.component === toggleTarget.component,
               )
             : undefined;
 
@@ -331,16 +359,25 @@ export class RenderEngine {
         // Collapse/expand anchoring: keep the toggled cell stable on screen.
         // This overrides the general anchor because the user's action was on
         // this specific cell.
-        if (collapseAnchorRange && collapseToggle) {
+        if (collapseAnchorRange && toggleTarget) {
             const componentStart = collapseAnchorRange.startLine;
             const viewportTop = previousVisibleRootStart;
             const viewportBottom = viewportTop + previousVisibleScrollableRows;
 
-            if (collapseToggle.startLine < viewportTop) {
+            // For local toggles we have the exact click-time startLine.
+            // For global toggles we approximate from the previous line ranges.
+            const toggleStartLine =
+                "startLine" in toggleTarget &&
+                typeof (toggleTarget as Record<string, unknown>).startLine ===
+                    "number"
+                    ? (toggleTarget as { startLine: number }).startLine
+                    : oldComponentStarts.get(toggleTarget.component) ?? -1;
+
+            if (toggleStartLine >= 0 && toggleStartLine < viewportTop) {
                 // Toggled cell was above the viewport: snap its header to the
                 // top on collapse. On expansion, leave the viewport alone so
                 // the user isn't pulled up by content growing above them.
-                if (collapseToggle.collapsed) {
+                if (toggleTarget.collapsed) {
                     const desiredOffset =
                         lines.length - scrollableRows - componentStart;
                     this.scrollOffset = Math.max(
@@ -348,11 +385,11 @@ export class RenderEngine {
                         Math.min(desiredOffset, lines.length - scrollableRows),
                     );
                 }
-            } else if (collapseToggle.startLine < viewportBottom) {
+            } else if (toggleStartLine >= 0 && toggleStartLine < viewportBottom) {
                 // Toggled cell was inside the viewport: pin its header to the
                 // same screen row it occupied before the toggle. This prevents
                 // the viewport from drifting when nested content changes size.
-                const oldScreenRow = collapseToggle.startLine - viewportTop;
+                const oldScreenRow = toggleStartLine - viewportTop;
                 const desiredStart = componentStart - oldScreenRow;
                 const desiredOffset =
                     lines.length - scrollableRows - desiredStart;

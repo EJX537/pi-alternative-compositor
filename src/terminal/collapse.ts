@@ -71,6 +71,13 @@ export class ComponentCollapseState {
         startLine: number;
     } | null = null;
 
+    /**
+     * Snapshot of collapse states taken before reconciliation, used to detect
+     * Pi's native global collapse/expand toggle (keyboard shortcut) which
+     * bypasses this.toggle().
+     */
+    private preReconcileSnapshot: Map<object, boolean> | null = null;
+
     /** Toggle the most specific supported component in an outer-to-inner path. */
     toggle(path: readonly RootComponentLineRange[]): boolean {
         const tool = path.toReversed().find((range) =>
@@ -162,6 +169,72 @@ export class ComponentCollapseState {
     /** Return true if the component supports collapse/expand toggling. */
     isCollapsibleComponent(component: unknown): boolean {
         return isToolComponent(component) || isAssistantComponent(component);
+    }
+
+    /** Walk the component tree and record the collapse state of every collapsible component. */
+    snapshotCollapseState(roots: readonly unknown[]): void {
+        this.preReconcileSnapshot = new Map();
+        const seen = new Set<object>();
+        const visit = (component: unknown): void => {
+            if (!component || typeof component !== "object" || seen.has(component)) return;
+            seen.add(component);
+            const collapsed = this.isCollapsed(component);
+            if (collapsed !== null) {
+                this.preReconcileSnapshot!.set(component, collapsed);
+            }
+            const children = (component as ComponentLike).children;
+            if (Array.isArray(children)) children.forEach(visit);
+        };
+        roots.forEach(visit);
+    }
+
+    /**
+     * After rendering, detect any component whose collapse state changed compared
+     * to the pre-reconcile snapshot.  Returns a pseudo-toggle entry for the first
+     * change found, or null if no global toggle occurred.  Consumes the snapshot.
+     *
+     * If a local toggle was already recorded (via toggle()), returns null so the
+     * caller handles the local toggle exclusively.  startLine is set to -1
+     * because the pre-render absolute line position is unknown here; the caller
+     * should look it up from the previous root component line ranges.
+     */
+    consumeGlobalToggle(roots: readonly unknown[]): {
+        component: object;
+        collapsed: boolean;
+    } | null {
+        const snapshot = this.preReconcileSnapshot;
+        this.preReconcileSnapshot = null;
+        if (!snapshot || snapshot.size === 0 || this.lastToggled) return null;
+
+        const seen = new Set<object>();
+        const walk = (component: unknown): { component: object; collapsed: boolean } | null => {
+            if (!component || typeof component !== "object" || seen.has(component))
+                return null;
+            seen.add(component);
+
+            const prev = snapshot.get(component);
+            if (prev !== undefined) {
+                const now = this.isCollapsed(component);
+                if (now !== null && prev !== now) {
+                    return { component, collapsed: now };
+                }
+            }
+
+            const children = (component as ComponentLike).children;
+            if (Array.isArray(children)) {
+                for (const child of children) {
+                    const result = walk(child);
+                    if (result) return result;
+                }
+            }
+            return null;
+        };
+
+        for (const root of roots) {
+            const result = walk(root);
+            if (result) return result;
+        }
+        return null;
     }
 
     /** Reapply only explicit local overrides, never undo Pi's global state. */
