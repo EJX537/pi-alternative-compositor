@@ -85,6 +85,7 @@ export class CompositorLifecycle {
                     belowWidgetLines: belowChildren.flatMap((child) =>
                         renderHidden(nextCompositor, child, width),
                     ),
+                    topPaddingLines: 1,
                 });
             },
         });

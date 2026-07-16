@@ -12,6 +12,8 @@ export interface FixedEditorClusterInput {
     editorLines: string[];
     belowWidgetLines?: string[];
     footerLines?: string[];
+    /** Number of blank lines to reserve directly above the editor input. */
+    topPaddingLines?: number;
 }
 
 export interface FixedEditorCursor { row: number; col: number; }
@@ -68,9 +70,11 @@ export function renderFixedEditorCluster(input: FixedEditorClusterInput): FixedE
     // needs. Filling the remaining terminal height with padding pushes the
     // scrollable chat log off the screen.
     const status = takeTail(statusLines, maxRows);
-    let remaining = maxRows - editorLines.length - status.length;
+    const topPaddingLines = Math.max(0, input.topPaddingLines ?? 0);
+    let remaining = maxRows - editorLines.length - status.length - topPaddingLines;
     const aboveWidgets = takeTail(aboveWidgetLines, remaining); remaining -= aboveWidgets.length;
     const belowWidgets = takeTail(belowWidgetLines, remaining); remaining -= belowWidgets.length;
     const footer = takeTail(footerLines, remaining);
-    return extractCursor([...status, ...aboveWidgets, ...editorLines, ...belowWidgets, ...footer]);
+    const topPadding = Array.from({ length: topPaddingLines }, () => " ".repeat(width));
+    return extractCursor([...status, ...aboveWidgets, ...topPadding, ...editorLines, ...belowWidgets, ...footer]);
 }
