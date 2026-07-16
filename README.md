@@ -2,7 +2,7 @@
 
 > **⚠️ EXPERIMENTAL — heavily vibe coded.** This extension was AI-generated and hooks into pi's private internals. It may break on any pi upgrade. Use at your own risk.
 
-A scrollable chat viewport compositor for [pi coding agent](https://pi.dev) that replaces the built-in TUI rendering pipeline. It keeps the editor fixed at the bottom, adds scrollback, mouse selection, and click-to-collapse interactions.
+A scrollable chat viewport compositor for [pi coding agent](https://pi.dev) that replaces the built-in TUI rendering pipeline. It keeps the editor fixed at the bottom, click-to-collapse interactions, and a sidebar.
 
 > **⚠️ Internal API dependency:** Patches pi's private internals (`tui.render`, `tui.doRender`, `terminal.write`, `compositeLineAt`, `terminal.rows`/`columns`). Only tested against pi v0.80.x + Zed's integrated (Alacritty). Expect breakage on upgrade.
 

@@ -19,6 +19,8 @@ export class SidebarState {
                     line("Session active"),
                     line("PgUp/PgDn to scroll"),
                     line("Drag to select"),
+                    line(""),
+                    line("This is just to showcase its possible"),
                 ];
                 return [
                     ...builtInLines,

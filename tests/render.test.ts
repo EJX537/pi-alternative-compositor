@@ -65,7 +65,7 @@ describe("buildFixedClusterPaint", () => {
         expect(result).toContain("\x1b[r");
     });
 
-    it("moves cursor to each line and clears it", () => {
+    it("moves cursor to each line and pads to width", () => {
         const cluster: FixedEditorClusterRender = {
             lines: ["line1", "line2"],
             cursor: null,
@@ -75,7 +75,8 @@ describe("buildFixedClusterPaint", () => {
         // Lines should start at bottom (row 23 for 24 terminal rows with 2 lines)
         expect(result).toContain("\x1b[23;1H");
         expect(result).toContain("\x1b[24;1H");
-        expect(result).toContain("\x1b[2K");
+        // Should NOT use clearLine (\x1b[2K) — pads with spaces instead
+        expect(result).not.toContain("\x1b[2K");
         expect(result).toContain("line1");
         expect(result).toContain("line2");
     });
@@ -102,15 +103,16 @@ describe("buildFixedClusterPaint", () => {
         expect(result).toContain("\x1b[?25l");
     });
 
-    it("hides cursor when showHardwareCursor is false even if cursor exists", () => {
+    it("leaves cursor visibility alone when showHardwareCursor is false even if cursor exists", () => {
         const cluster: FixedEditorClusterRender = {
             lines: ["line"],
             cursor: { row: 0, col: 0 },
         };
         const result = buildFixedClusterPaint(cluster, 24, 80, false);
 
-        // Should hide cursor when showHardwareCursor is false
-        expect(result).toContain("\x1b[?25l");
+        // Should NOT emit any cursor visibility command when
+        // showHardwareCursor is false — Pi owns cursor visibility.
+        expect(result).not.toContain("\x1b[?25");
     });
 
     it("truncates lines that exceed terminal width", () => {

@@ -15,6 +15,10 @@ export function sliceColumns(text: string, startCol: number, endCol: number): st
     return result;
 }
 export function sanitizeLine(line: string, width: number): string {
+    // Fast path: lines with no escape sequences that already fit within the
+    // terminal width need no sanitization at all.  This avoids the regex in
+    // visibleWidth/stripAnsi for the common case of plain trace output.
+    if (line.indexOf("\x1b") === -1 && line.length <= width) return line;
     return visibleWidth(line) > width ? truncateToWidth(line, width, "", true) : line;
 }
 export function normalizeOverlayCompositionLine(line: string): string { return line.replace(/\t/g, "   "); }

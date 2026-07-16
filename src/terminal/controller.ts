@@ -193,15 +193,39 @@ export class TerminalSplitCompositor {
 
         this.terminal.write = (data: string) => this.write(data);
         if (this.originalDoRender) {
+            // Track overlay state across doRender calls so we can detect
+            // overlay-non-overlay transitions and avoid unnecessary
+            // full-screen repaints that flicker the input bar.
+            let lastDoRenderHadOverlay = false;
             this.tui.doRender = () => {
                 this.renderPassActive = true;
                 this.renderEngine.setRenderPassActive(true);
                 try {
-                    if (this.renderEngine.hasVisibleOverlay()) {
+                    const hasOverlay = this.renderEngine.hasVisibleOverlay();
+                    if (hasOverlay) {
                         // Overlays are rendered by Pi's own pipeline so modal
                         // focus, compositing, and cursor positioning stay correct.
+                        lastDoRenderHadOverlay = true;
+                        this.originalDoRender?.();
+                    } else if (lastDoRenderHadOverlay) {
+                        // Overlay was just removed: use Pi's differential update
+                        // (via originalDoRender) instead of paintFullFrame to avoid
+                        // clearing and redrawing the entire cluster+sidebar, which
+                        // are already correct on screen. The write interceptor
+                        // checks the repaint-pending flag and skips the repaint.
+                        //
+                        // Prevent Pi from detecting a terminal resize: during
+                        // overlay, terminal.rows returned getRawRows() and
+                        // terminal.columns returned getRawColumns(). After
+                        // overlay, they return different values, causing Pi to
+                        // do a full clear that erases the cluster.
+                        this.tui.previousWidth = this.tui.terminal.columns;
+                        this.tui.previousHeight = this.tui.terminal.rows;
+                        lastDoRenderHadOverlay = false;
+                        this.renderEngine.overlayTransitionRepaintPending = true;
                         this.originalDoRender?.();
                     } else {
+                        lastDoRenderHadOverlay = false;
                         // Normal renders are owned entirely by the compositor:
                         // one terminal write that refreshes root + cluster.
                         this.requestRepaint();
@@ -442,26 +466,23 @@ export class TerminalSplitCompositor {
             // operate on empty/outdated ranges. Skip scroll/motion: scroll
             // events are frequent and clearing caches every wheel tick causes
             // noticeable lag.
-            const needsFreshState = mouseResult.packets.some(
+            const needsFreshRanges = mouseResult.packets.some(
                 (packet) =>
                     !isMouseMotion(packet) &&
                     base(packet.code) !== 64 &&
                     base(packet.code) !== 65,
             );
-            if (needsFreshState && !this.renderPassActive) {
+            if (needsFreshRanges && !this.renderPassActive) {
                 try {
-                    const width = this.renderEngine.getSidebarLayout().mainWidth;
-                    this.renderEngine.forceRefreshRootState(width);
+                    this.renderEngine.refreshRootComponentRanges();
                     logDebug(
-                        "lazy-refresh: ranges=",
+                        "lazy-ranges-refresh: ranges=",
                         this.renderEngine.currentRootComponentLineRanges.length,
                         "visibleRows=",
                         this.renderEngine.currentVisibleScrollableRows,
-                        "rootLines=",
-                        this.renderEngine.currentRootLines.length,
                     );
                 } catch (err) {
-                    logDebug("lazy-refresh-error:", err);
+                    logDebug("lazy-ranges-refresh-error:", err);
                 }
             }
 
@@ -525,12 +546,15 @@ export class TerminalSplitCompositor {
             this.selectionManager.hadDrag = false;
         }
 
-        // Share the cluster cache between range refresh and viewport repaint
-        // so the fixed editor area is rendered only once per scroll.
+        // Share the cluster cache between viewport repaint and any
+        // internal getCluster() calls so the fixed editor area is
+        // rendered only once per scroll.  Component range mapping is
+        // skipped here because it is only needed for mouse hit-testing
+        // (clicks), not for the scroll paint itself.  It is refreshed
+        // lazily by handleInput() before any click is dispatched.
         this.renderEngine.setRenderPassActive(true);
         try {
             this.renderEngine.currentScrollOffset = nextOffset;
-            this.renderEngine.refreshRootComponentRanges();
             this.renderEngine.repaintScrollableViewport(width, {
                 skipClusterAndSidebar: true,
             });

@@ -6,7 +6,6 @@ import {
     setScrollRegion,
     resetScrollRegion,
     moveCursor,
-    clearLine,
     clearToEndOfLine,
 } from "./escape.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
@@ -96,6 +95,15 @@ export class RenderEngine {
     private visibleScrollableRows = 0;
     private visibleRootLines: string[] = [];
     private visibleClusterLines: string[] = [];
+
+    /**
+     * Set by the controller when transitioning from overlay\xe2\x86\x92non-overlay.
+     * When true, write() skips the cluster+sidebar repaint because they
+     * are already correct on screen from the last paintFullFrame.
+     * Avoids a visible clear+redraw flicker in the input bar area during
+     * quick overlay transitions (e.g. compositor settings toggle).
+     */
+    overlayTransitionRepaintPending = false;
 
     constructor(params: {
         tui: TuiInternals;
@@ -495,14 +503,9 @@ export class RenderEngine {
         const syncBegin = noSyncScroll ? "" : beginSynchronizedOutput();
         const syncEnd = noSyncScroll ? "" : endSynchronizedOutput();
 
-        // Diagnostic: some terminals struggle with the volume of bytes emitted
-        // per scroll tick. When a repaint is triggered only by a scroll offset
-        // change, the fixed cluster and sidebar do not move; skipping them cuts
-        // the output volume significantly. PI_COMPOSITOR_NO_SCROLL_OPTIMIZE=1
-        // disables this optimization for A/B testing.
-        const optimizeScroll =
-            options?.skipClusterAndSidebar === true &&
-            process.env.PI_COMPOSITOR_NO_SCROLL_OPTIMIZE !== "1";
+        // The fixed cluster (input bar) and sidebar do not move during a scroll,
+        // so skip painting them entirely.  Only the scrollable root content needs
+        // to be updated.
 
         let buffer =
             syncBegin +
@@ -510,20 +513,34 @@ export class RenderEngine {
             setScrollRegion(1, scrollableRows) +
             moveCursor(1, 1);
 
+        // When no selection is active, skip the per-row
+        // renderSelectionHighlight call entirely.  It returns the line
+        // unchanged when there is no selection, but the call overhead
+        // + getSelectionRangeForLine check adds up over 20+ rows per
+        // repaint.
+        const hasSelection = this.selectionManager.area !== null;
         for (let row = 0; row < scrollableRows; row++) {
             if (row > 0) buffer += "\r\n";
-            buffer += clearLine();
-            buffer += sanitizeLine(
-                this.selectionManager.renderSelectionHighlight(
-                    this.visibleRootLines[row] ?? "",
-                    start + row,
-                    "root",
-                ),
-                width,
-            );
+            const line = this.visibleRootLines[row] ?? "";
+            const highlighted = hasSelection
+                ? this.selectionManager.renderSelectionHighlight(
+                      line,
+                      start + row,
+                      "root",
+                  )
+                : line;
+            const content = sanitizeLine(highlighted, width);
+            // Pad to `width` columns instead of using clearLine() (\x1b[2K),
+            // which erases the ENTIRE line including the sidebar area.  Padding
+            // only overwrites columns 1..width, leaving the sidebar columns
+            // untouched so they persist correctly between scroll repaints.
+            const vis = visibleWidth(content);
+            buffer += vis >= width
+                ? content + "\x1b[0m"
+                : content + "\x1b[0m" + " ".repeat(width - vis);
         }
 
-        if (optimizeScroll) {
+        if (options?.skipClusterAndSidebar) {
             // Reset the scroll region so subsequent terminal writes outside the
             // scrollable area behave correctly. The cluster and sidebar are
             // already on screen from the previous frame.
@@ -567,8 +584,15 @@ export class RenderEngine {
 
         for (let row = 0; row < scrollableRows; row++) {
             if (row > 0) buffer += "\r\n";
-            buffer += moveCursor(row + 1, 1) + clearLine();
-            buffer += sanitizeLine(highlightedRootLines[row] ?? "", width);
+            buffer += moveCursor(row + 1, 1);
+            const content = sanitizeLine(
+                highlightedRootLines[row] ?? "",
+                width,
+            );
+            const vis = visibleWidth(content);
+            buffer += vis >= width
+                ? content + "\x1b[0m"
+                : content + "\x1b[0m" + " ".repeat(width - vis);
         }
 
         buffer += buildFixedClusterPaint(
@@ -889,6 +913,23 @@ export class RenderEngine {
 
         if (reservedRows === 0 || rawRows <= 2) {
             this.originalWrite(data);
+            return;
+        }
+
+        // When transitioning from overlay\xe2\x86\x92non-overlay the cluster and sidebar
+        // are already painted on screen \xe2\x80\x94 repainting them here is unnecessary and
+        // causes a visible clear+redraw flicker in the input bar area.
+        if (this.overlayTransitionRepaintPending) {
+            this.overlayTransitionRepaintPending = false;
+            const buffer =
+                beginSynchronizedOutput() +
+                disableAutoWrap() +
+                moveCursor(1, 1) +
+                data +
+                enableAutoWrap() +
+                this.getMouseReportingGuard() +
+                endSynchronizedOutput();
+            this.originalWrite(buffer);
             return;
         }
 
