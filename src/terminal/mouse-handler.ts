@@ -233,7 +233,7 @@ export class MouseHandler {
         ) {
             const path = this.getRootComponentPathAtLine(location.point.line);
             logDebug("release-toggle: path=", path.length, "line=", location.point.line);
-            const toggled = this.collapseState.toggle(path);
+            const toggled = this.collapseState.toggle(path, location.point.line);
             logDebug("release-toggle-result:", toggled);
             if (toggled) {
                 this.selectionManager.clearSelection();

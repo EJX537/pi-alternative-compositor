@@ -78,8 +78,16 @@ export class ComponentCollapseState {
      */
     private preReconcileSnapshot: Map<object, boolean> | null = null;
 
-    /** Toggle the most specific supported component in an outer-to-inner path. */
-    toggle(path: readonly RootComponentLineRange[]): boolean {
+    /**
+     * Toggle the most specific supported component in an outer-to-inner path.
+     * `clickedLine` is the absolute root line the user clicked, used for
+     * viewport anchoring. When omitted (e.g. global keyboard toggles), the
+     * component's startLine is used as a fallback.
+     */
+    toggle(
+        path: readonly RootComponentLineRange[],
+        clickedLine?: number,
+    ): boolean {
         const tool = path.toReversed().find((range) =>
             isToolComponent(range.component),
         );
@@ -99,7 +107,10 @@ export class ComponentCollapseState {
                 component: tool.component,
                 kind: "tool",
                 collapsed: nextCollapsed,
-                startLine: tool.startLine,
+                // For small tool headers the component startLine is usually
+                // identical to the click line, but using the click line keeps
+                // behavior consistent with assistant/thinking toggles.
+                startLine: clickedLine ?? tool.startLine,
             };
             tool.component.setExpanded(!nextCollapsed);
             return true;
@@ -123,7 +134,11 @@ export class ComponentCollapseState {
             component: assistant.component,
             kind: "assistant",
             collapsed: nextCollapsed,
-            startLine: assistant.startLine,
+            // Assistant components can be very tall (the thinking block is a
+            // small child inside a large message). Anchor from the actual click
+            // line so the viewport doesn't jump when a deep thinking block is
+            // collapsed.
+            startLine: clickedLine ?? assistant.startLine,
         };
         assistant.component.setHideThinkingBlock(nextCollapsed);
         return true;

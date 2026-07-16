@@ -335,4 +335,83 @@ describe("Collapse anchor bug fixes", () => {
 
         compositor.dispose();
     });
+
+    it("pins an assistant/thinking toggle to the clicked line, not the assistant top", () => {
+        // Regression: assistant components can be much taller than tools. The
+        // thinking block is a small child inside the assistant message, so the
+        // user often clicks far below the assistant's startLine. The anchor
+        // must use the click line, otherwise the viewport snaps to the
+        // assistant's top and the screen jumps.
+        const { options } = createOptions();
+        options.renderCluster = () => ({
+            lines: Array.from({ length: 20 }, () => "cluster"),
+            cursor: null,
+        });
+
+        const assistant = {
+            lastMessage: { role: "assistant", id: "assistant-thinking" },
+            hideThinkingBlock: false,
+            setHideThinkingBlock(this: { hideThinkingBlock: boolean }, value: boolean) {
+                this.hideThinkingBlock = value;
+            },
+            render: function (this: { hideThinkingBlock: boolean }) {
+                return [
+                    ...Array.from({ length: 10 }, (_, i) => `assistant intro ${i}`),
+                    ...(this.hideThinkingBlock
+                        ? []
+                        : Array.from({ length: 20 }, (_, i) => `thinking ${i}`)),
+                    ...Array.from({ length: 5 }, (_, i) => `assistant outro ${i}`),
+                ];
+            },
+        };
+
+        const after = Array.from({ length: 20 }, (_, i) => ({
+            render: () => [`after ${i}`],
+        }));
+
+        const tui = options.tui as unknown as {
+            children: unknown[];
+            render: (width: number) => string[];
+        };
+        tui.children = [assistant, ...after];
+        tui.render = () => [
+            ...assistant.render(),
+            ...after.flatMap((c) => c.render()),
+        ];
+
+        const compositor = new TerminalSplitCompositor(options);
+        const internal = compositor as unknown as {
+            scrollBy(delta: number): void;
+            visibleRootStart: number;
+        };
+        const cs = compositor as unknown as {
+            collapseState: {
+                toggle: (path: unknown[], clickedLine?: number) => boolean;
+            };
+        };
+
+        compositor.install();
+        tui.render(80);
+
+        // Total = 10 + 20 + 5 + 20 = 55 lines. scrollableRows = 4.
+        // Scroll so the thinking header (line 10) is at screen row 2.
+        // viewportTop = 10 - 2 = 8.
+        internal.scrollBy(55 - 4 - 8);
+        tui.render(80);
+        expect(internal.visibleRootStart).toBe(8);
+
+        // Click inside the thinking block at line 12 (screen row 4).
+        const path = compositor.getRootComponentPathAtLine(12);
+        cs.collapseState.toggle(path, 12);
+        expect(assistant.hideThinkingBlock).toBe(true);
+
+        tui.render(80);
+
+        // After collapse: total = 10 + 5 + 20 = 35 lines. maxScrollOffset = 31.
+        // The viewport should stay pinned near its original top (line 8),
+        // not snap to the assistant's top line (0).
+        expect(internal.visibleRootStart).toBe(8);
+
+        compositor.dispose();
+    });
 });

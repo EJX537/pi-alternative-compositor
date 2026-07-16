@@ -398,11 +398,20 @@ export class RenderEngine {
                     );
                 }
             } else if (toggleStartLine >= 0 && toggleStartLine < viewportBottom) {
-                // Toggled cell was inside the viewport: pin its header to the
-                // same screen row it occupied before the toggle. This prevents
-                // the viewport from drifting when nested content changes size.
+                // Toggled cell was inside the viewport: pin the toggled line
+                // (for local toggles, the exact click line) to the same screen
+                // row it occupied before the toggle. For tools this is the
+                // header; for assistant/thinking toggles it is the clicked
+                // line inside the large message, which avoids jumping to the
+                // assistant's top line.
                 const oldScreenRow = toggleStartLine - viewportTop;
-                const desiredStart = componentStart - oldScreenRow;
+                // For local toggles we know the exact click line; for global
+                // toggles we fall back to the component's start line.
+                const anchorTargetLine =
+                    "startLine" in toggleTarget
+                        ? toggleStartLine
+                        : componentStart;
+                const desiredStart = anchorTargetLine - oldScreenRow;
                 const desiredOffset =
                     lines.length - scrollableRows - desiredStart;
                 this.scrollOffset = Math.max(
