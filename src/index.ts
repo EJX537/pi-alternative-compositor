@@ -2,7 +2,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { getSidebarRegistry } from "./app/sidebar-registry.js";
 import { CompositorLifecycle } from "./app/lifecycle.js";
-import { loadSettings } from "./app/settings-store.js";
+import { loadSettingsSync } from "./app/settings-store.js";
 import { showCompositorSettings } from "./app/settings-ui.js";
 import type { TuiInternals } from "./pi/internals.js";
 
@@ -20,11 +20,18 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
             showCompositorSettings(ctx, lifecycle.sidebar, lifecycle.requestRender),
     });
 
-    pi.on("session_start", async (event, ctx) => {
+    pi.on("session_start", (event, ctx) => {
         if (ctx.mode !== "tui") return;
 
-        lifecycle.sidebar.enabled = true; // updated from settings below
+        // Load settings synchronously before registering the widget.  The
+        // compositor must be installed on the very next Pi render so it can
+        // take over the screen; an async settings load here would leave a
+        // window where the sidebar could flash on /resume before settings
+        // resolved.
+        const settings = loadSettingsSync();
+        lifecycle.sidebar.enabled = settings.enableSidebar;
         lifecycle.sidebar.visible =
+            lifecycle.sidebar.enabled &&
             event.reason !== "new" &&
             ctx.sessionManager.getBranch().some((entry) => entry.type === "message");
 
@@ -37,13 +44,11 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
             { placement: "aboveEditor" },
         );
 
-        // Now load settings asynchronously — compositor is already installed.
-        const settings = await loadSettings();
-        if (lifecycle.sidebar.enabled !== settings.enableSidebar) {
-            lifecycle.sidebar.enabled = settings.enableSidebar;
-            if (!lifecycle.sidebar.enabled) lifecycle.sidebar.visible = false;
-            lifecycle.requestRender();
-        }
+        // Note: pi-coding-agent renders one default-pi frame before
+        // session_start fires (see interactive-mode.js ui.start() before
+        // rebindCurrentSession()). That one-frame flash can only be fixed
+        // upstream; the compositor's install sequence clears the screen as
+        // soon as it is loaded.
     });
 
     pi.on("agent_start", () => lifecycle.setSidebarVisible(true));

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadSettings, saveSettings } from "../src/app/settings-store";
+import { loadSettings, loadSettingsSync, saveSettings } from "../src/app/settings-store";
 
 const directories: string[] = [];
 
@@ -20,10 +20,10 @@ afterEach(async () => {
 });
 
 describe("compositor settings", () => {
-    it("uses enabled sidebar defaults when Pi settings do not exist", async () => {
+    it("uses disabled sidebar defaults when Pi settings do not exist", async () => {
         const agentDir = await createTempDirectory();
         await expect(loadSettings(agentDir)).resolves.toEqual({
-            enableSidebar: true,
+            enableSidebar: false,
         });
     });
 
@@ -48,12 +48,34 @@ describe("compositor settings", () => {
         });
     });
 
+    it("reads settings synchronously from disk", async () => {
+        const agentDir = await createTempDirectory();
+        await writeFile(
+            join(agentDir, "settings.json"),
+            JSON.stringify({ compositor: { enableSidebar: true } }),
+            "utf8",
+        );
+
+        expect(loadSettingsSync(agentDir)).toEqual({ enableSidebar: true });
+    });
+
+    it("falls back to defaults for synchronous read errors", async () => {
+        const agentDir = await createTempDirectory();
+        await writeFile(
+            join(agentDir, "settings.json"),
+            "not json",
+            "utf8",
+        );
+
+        expect(loadSettingsSync(agentDir)).toEqual({ enableSidebar: false });
+    });
+
     it("falls back to defaults for malformed settings", async () => {
         const agentDir = await createTempDirectory();
         await writeFile(join(agentDir, "settings.json"), "not json", "utf8");
 
         await expect(loadSettings(agentDir)).resolves.toEqual({
-            enableSidebar: true,
+            enableSidebar: false,
         });
     });
 });

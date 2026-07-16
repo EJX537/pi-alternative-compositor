@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -9,7 +10,7 @@ export interface CompositorSettings {
 }
 
 export const DEFAULT_SETTINGS: CompositorSettings = {
-    enableSidebar: true,
+    enableSidebar: false,
 };
 
 type RootSettings = Record<string, unknown>;
@@ -54,6 +55,19 @@ export async function loadSettings(
 ): Promise<CompositorSettings> {
     try {
         return compositorSettings(await readRootSettings(agentDir));
+    } catch {
+        return { ...DEFAULT_SETTINGS };
+    }
+}
+
+/** Synchronous variant used during session startup to avoid a sidebar flash. */
+export function loadSettingsSync(
+    agentDir = getAgentDir(),
+): CompositorSettings {
+    try {
+        return compositorSettings(
+            JSON.parse(readFileSync(settingsPath(agentDir), "utf8")),
+        );
     } catch {
         return { ...DEFAULT_SETTINGS };
     }
