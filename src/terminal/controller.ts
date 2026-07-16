@@ -216,6 +216,21 @@ export class TerminalSplitCompositor {
                 overlayWidth,
                 totalWidth,
             ) ?? "";
+
+        // Eagerly refresh the root window state so that mouse hit-testing
+        // data (visibleScrollableRows, rootComponentLineRanges) is populated
+        // immediately, before the first async doRender() fires. Without this,
+        // mouse events arriving during the startup window see default values
+        // (scrollableRows === 0, ranges === []) and clicks are silently ignored.
+        try {
+            this.renderEngine.refreshRootWindow(
+                this.renderEngine.getSidebarLayout().mainWidth,
+            );
+        } catch {
+            // Refresh failed (e.g. children not ready). State stays at defaults
+            // until the first paintFullFrame() populates it.
+        }
+
         this.installed = true;
     }
 
