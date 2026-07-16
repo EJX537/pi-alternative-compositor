@@ -14,6 +14,7 @@ import type {
     SelectionLocation,
     SgrMousePacket,
 } from "./types.js";
+import { logDebug } from "./debug-log.js";
 
 // ── MouseHandler ─────────────────────────────────────────────
 
@@ -79,6 +80,15 @@ export class MouseHandler {
         scrollOffset: number,
         maxScrollOffset: number,
     ): boolean {
+        logDebug(
+            "mouse-packet:",
+            "row=", packet.row,
+            "col=", packet.col,
+            "code=", packet.code,
+            "final=", packet.final,
+            "visibleRows=", visibleScrollableRows,
+            "visibleRootStart=", visibleRootStart,
+        );
         const delta = mouseScrollDelta(packet);
         if (delta !== 0) {
             this.selectionManager.clearSelection();
@@ -108,7 +118,11 @@ export class MouseHandler {
             return true;
         }
 
-        if (!location) return true;
+        if (!location) {
+            logDebug("mouse-location: null");
+            return true;
+        }
+        logDebug("mouse-location:", "area=", location.area, "line=", location.point.line, "col=", location.point.col);
 
         if (isLeftPress(packet)) {
             this.handleLeftPress(location, visibleRootStart, visibleScrollableRows, visibleRootLines, visibleClusterLines);
@@ -217,9 +231,10 @@ export class MouseHandler {
                 location,
             )
         ) {
-            const toggled = this.collapseState.toggle(
-                this.getRootComponentPathAtLine(location.point.line),
-            );
+            const path = this.getRootComponentPathAtLine(location.point.line);
+            logDebug("release-toggle: path=", path.length, "line=", location.point.line);
+            const toggled = this.collapseState.toggle(path);
+            logDebug("release-toggle-result:", toggled);
             if (toggled) {
                 this.selectionManager.clearSelection();
                 this.selectionManager.lastPress = null;

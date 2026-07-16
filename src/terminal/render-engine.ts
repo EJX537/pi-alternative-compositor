@@ -268,6 +268,17 @@ export class RenderEngine {
         return this.tui.children.slice(0, this.clusterStartIndex);
     }
 
+    /**
+     * Drop every render cache so the next root-window refresh recomputes line
+     * ranges from the live component tree. Useful when we suspect stale cached
+     * output (e.g. fresh startup where Pi populated children after install).
+     */
+    forceRefreshRootState(width: number): number {
+        this.childRenderCache.clear();
+        this.rangeMapper.clear();
+        return this.refreshRootWindow(width);
+    }
+
     refreshRootWindow(width: number): number {
         if (!this.originalRender) return this.updateVisibleRootWindow();
 

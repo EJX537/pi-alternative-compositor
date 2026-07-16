@@ -23,6 +23,7 @@ import type {
     RootComponentLineRange,
     TerminalSplitCompositorOptions,
 } from "./types.js";
+import { logDebug } from "./debug-log.js";
 
 // ── TerminalSplitCompositor ──────────────────────────────────
 
@@ -227,9 +228,16 @@ export class TerminalSplitCompositor {
             this.renderEngine.refreshRootWindow(
                 this.renderEngine.getSidebarLayout().mainWidth,
             );
-        } catch {
-            // Refresh failed (e.g. children not ready). State stays at defaults
-            // until the first paintFullFrame() populates it.
+            logDebug(
+                "install-eager-refresh: ranges=",
+                this.renderEngine.currentRootComponentLineRanges.length,
+                "visibleRows=",
+                this.renderEngine.currentVisibleScrollableRows,
+                "rootLines=",
+                this.renderEngine.currentRootLines.length,
+            );
+        } catch (err) {
+            logDebug("install-eager-refresh-error:", err);
         }
 
         this.installed = true;
@@ -380,6 +388,16 @@ export class TerminalSplitCompositor {
             ? parseSgrMousePackets(data)
             : null;
         if (mouseResult && mouseResult.packets.length > 0) {
+            logDebug(
+                "handleInput-mouse: packets=",
+                mouseResult.packets.length,
+                "renderPassActive=",
+                this.renderPassActive,
+                "ranges=",
+                this.renderEngine.currentRootComponentLineRanges.length,
+                "visibleRows=",
+                this.renderEngine.currentVisibleScrollableRows,
+            );
             // Mouse hit-testing state is normally refreshed by paintFullFrame(),
             // but on fresh startup the compositor installs before Pi populates
             // the chat. If a render is missed or coalesced, the line ranges can
@@ -390,11 +408,18 @@ export class TerminalSplitCompositor {
             );
             if (needsFreshState && !this.renderPassActive) {
                 try {
-                    this.renderEngine.refreshRootWindow(
-                        this.renderEngine.getSidebarLayout().mainWidth,
+                    const width = this.renderEngine.getSidebarLayout().mainWidth;
+                    this.renderEngine.forceRefreshRootState(width);
+                    logDebug(
+                        "lazy-refresh: ranges=",
+                        this.renderEngine.currentRootComponentLineRanges.length,
+                        "visibleRows=",
+                        this.renderEngine.currentVisibleScrollableRows,
+                        "rootLines=",
+                        this.renderEngine.currentRootLines.length,
                     );
-                } catch {
-                    // Ignore: the next paintFullFrame will repair state.
+                } catch (err) {
+                    logDebug("lazy-refresh-error:", err);
                 }
             }
             for (const packet of mouseResult.packets) {
