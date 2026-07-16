@@ -174,14 +174,6 @@ export class MouseHandler {
             return true;
         }
 
-        if (
-            isMouseMotion(packet) &&
-            this.selectionManager.updateHover(location)
-        ) {
-            this.repaint();
-            return true;
-        }
-
         // The compositor owns the alternate screen and mouse reporting; every
         // handled packet must return true so the caller does not pass it on to
         // Pi's default input handling.

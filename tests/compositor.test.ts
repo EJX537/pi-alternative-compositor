@@ -603,7 +603,7 @@ describe("TerminalSplitCompositor installation", () => {
         compositor.dispose();
     });
 
-    it("highlights a hovered collapsible root line with a background color", () => {
+    it("does not apply hover highlight on mouse motion (feature removed)", () => {
         const { options } = createOptions();
         const assistant = {
             lastMessage: { role: "assistant", id: "msg-hover" },
@@ -623,15 +623,11 @@ describe("TerminalSplitCompositor installation", () => {
         };
 
         compositor.install();
-        const linesWithoutHover = tui.render(80);
-        expect(linesWithoutHover[0]).not.toContain("\x1b[48;5;240m");
+        const linesBefore = tui.render(80);
+        expect(linesBefore[0]).not.toContain("\x1b[48;5;240m");
 
-        // SGR motion event with no button pressed (code 35).
+        // Mouse motion events should NOT produce hover highlight.
         internal.handleMousePacket({ code: 35, col: 1, row: 1, final: "M" });
-        const linesWithHover = tui.render(80);
-        expect(linesWithHover[0]).toContain("\x1b[48;5;240m");
-
-        internal.handleMousePacket({ code: 35, col: 1, row: 2, final: "M" });
         expect(tui.render(80)[0]).not.toContain("\x1b[48;5;240m");
         compositor.dispose();
     });

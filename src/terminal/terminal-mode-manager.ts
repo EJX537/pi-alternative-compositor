@@ -187,8 +187,7 @@ export class TerminalModeManager {
     mouseReportingStateGuard(): string {
         if (
             this.mouseScroll &&
-            !this.mouseReportingResumeTimer &&
-            !this.mouseReportingActive
+            !this.mouseReportingResumeTimer
         ) {
             return this.emitEnableMouseReporting();
         }

@@ -98,7 +98,7 @@ describe("escape sequences", () => {
     describe("mouse reporting", () => {
         it("enableMouseReporting", () => {
             expect(enableMouseReporting()).toBe(
-                "\x1b[?1003h\x1b[?1002h\x1b[?1006h",
+                "\x1b[?1002h\x1b[?1003h\x1b[?1006h",
             );
         });
 

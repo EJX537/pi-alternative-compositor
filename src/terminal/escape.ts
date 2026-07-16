@@ -86,7 +86,11 @@ export function enableAutoWrap(): string {
 // ── Mouse reporting ──────────────────────────────────────────
 
 export function enableMouseReporting(): string {
-    return "\x1b[?1003h\x1b[?1002h\x1b[?1006h";
+    // Modes 1000/1002/1003 are mutually exclusive; 1003 (any-event) is a
+    // superset of 1002 (button-event). Enable 1002 first, then 1003, so
+    // any-event mode takes effect and the terminal reports motion events
+    // even when no button is held (required for hover highlight).
+    return "\x1b[?1002h\x1b[?1003h\x1b[?1006h";
 }
 
 export function disableMouseReporting(): string {

@@ -4,9 +4,7 @@ import {
     sliceColumns,
     stripAnsi,
 } from "../compositor/text.js";
-import type { ComponentCollapseState } from "./collapse.js";
 import type {
-    RootComponentLineRange,
     SelectionArea,
     SelectionLocation,
     SelectionPoint,
@@ -35,8 +33,6 @@ export class SelectionManager {
     } | null = null;
     private _leftPressLoc: SelectionLocation | null = null;
     private _hadDrag = false;
-    private _hoverLine: number | null = null;
-
     // ── Public accessors ──────────────────────────────────
 
     get isDragging(): boolean {
@@ -99,14 +95,6 @@ export class SelectionManager {
 
     set hadDrag(value: boolean) {
         this._hadDrag = value;
-    }
-
-    get hoverRootLine(): number | null {
-        return this._hoverLine;
-    }
-
-    set hoverRootLine(value: number | null) {
-        this._hoverLine = value;
     }
 
     // ── Selection state management ──────────────────────────
@@ -277,50 +265,20 @@ export class SelectionManager {
         line: string,
         lineIndex: number,
         area: SelectionArea,
-        collapseState: ComponentCollapseState,
-        getRootComponentPathAtLine: (
-            line: number,
-        ) => readonly RootComponentLineRange[],
     ): string {
         const range = this.getSelectionRangeForLine(lineIndex, area);
-        const hovered =
-            area === "root" &&
-            lineIndex === this._hoverLine &&
-            this.isCollapsibleLine(
-                lineIndex,
-                collapseState,
-                getRootComponentPathAtLine,
-            );
-        const HOVER_BACKGROUND = "\x1b[48;5;240m";
-        const HOVER_BACKGROUND_RESET = "\x1b[49m";
-        if (!range) {
-            return hovered
-                ? `${HOVER_BACKGROUND}${line}${HOVER_BACKGROUND_RESET}`
-                : line;
-        }
+        if (!range) return line;
 
         const plain = stripAnsi(line);
-        const startCol = Math.max(
-            0,
-            Math.min(range.startCol, visibleWidth(plain)),
-        );
-        const endCol = Math.max(
-            startCol,
-            Math.min(range.endCol, visibleWidth(plain)),
-        );
-        if (startCol === endCol) {
-            return hovered
-                ? `${HOVER_BACKGROUND}${line}${HOVER_BACKGROUND_RESET}`
-                : line;
-        }
+        const lineWidth = visibleWidth(plain);
+        const startCol = Math.max(0, Math.min(range.startCol, lineWidth));
+        const endCol = Math.max(startCol, Math.min(range.endCol, lineWidth));
+        if (startCol === endCol) return line;
 
         const before = sliceColumns(plain, 0, startCol);
         const selected = sliceColumns(plain, startCol, endCol);
         const after = sliceColumns(plain, endCol, Number.POSITIVE_INFINITY);
-        const highlighted = `${before}\x1b[7m${selected}\x1b[27m${after}`;
-        return hovered
-            ? `${HOVER_BACKGROUND}${highlighted}${HOVER_BACKGROUND_RESET}`
-            : highlighted;
+        return `${before}\x1b[7m${selected}\x1b[27m${after}`;
     }
 
     clampedSelectionPointForPacket(
@@ -420,15 +378,6 @@ export class SelectionManager {
         return { scrolled: true, nextOffset };
     }
 
-    updateHover(location: SelectionLocation | null): boolean {
-        const next = location?.area === "root" ? location.point.line : null;
-        if (next !== this._hoverLine) {
-            this._hoverLine = next;
-            return true;
-        }
-        return false;
-    }
-
     isClick(press: SelectionLocation, release: SelectionLocation): boolean {
         return (
             press.area === release.area &&
@@ -437,18 +386,5 @@ export class SelectionManager {
         );
     }
 
-    // ── Helpers ──────────────────────────────────────────────
-
-    private isCollapsibleLine(
-        line: number,
-        collapseState: ComponentCollapseState,
-        getRootComponentPathAtLine: (
-            line: number,
-        ) => readonly RootComponentLineRange[],
-    ): boolean {
-        const path = getRootComponentPathAtLine(line);
-        return path.some((range) =>
-            collapseState.isCollapsibleComponent(range.component),
-        );
-    }
 }
+

@@ -469,8 +469,6 @@ export class RenderEngine {
                     line,
                     start + index,
                     "root",
-                    this.collapseState,
-                    (lineNum) => this.getRootComponentPathAtLine(lineNum),
                 );
             });
         } finally {
@@ -520,8 +518,6 @@ export class RenderEngine {
                     this.visibleRootLines[row] ?? "",
                     start + row,
                     "root",
-                    this.collapseState,
-                    (lineNum) => this.getRootComponentPathAtLine(lineNum),
                 ),
                 width,
             );
@@ -803,8 +799,6 @@ export class RenderEngine {
                     line,
                     index,
                     "cluster",
-                    this.collapseState,
-                    () => [],
                 ),
             ),
         };
