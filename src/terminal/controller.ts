@@ -8,6 +8,7 @@ import {
     isMouseMotion,
     isRootSubmitInput,
     mouseBaseButton,
+    mouseScrollDelta,
     parseKeyboardScrollDelta,
     parseSgrMousePackets,
 } from "./input.js";
@@ -429,7 +430,16 @@ export class TerminalSplitCompositor {
                     logDebug("lazy-refresh-error:", err);
                 }
             }
+            // Mouse wheel events often arrive in bursts from a single
+            // physical scroll gesture. Coalesce their deltas and apply a
+            // single scroll + repaint instead of repainting once per tick.
+            let wheelDelta = 0;
             for (const packet of mouseResult.packets) {
+                const delta = mouseScrollDelta(packet);
+                if (delta !== 0) {
+                    wheelDelta += delta;
+                    continue;
+                }
                 this.mouseHandler.handleMousePacket(
                     packet,
                     this.renderEngine.currentVisibleRootStart,
@@ -440,6 +450,9 @@ export class TerminalSplitCompositor {
                     this.renderEngine.currentScrollOffset,
                     this.renderEngine.currentMaxScrollOffset,
                 );
+            }
+            if (wheelDelta !== 0) {
+                this.scrollBy(wheelDelta);
             }
             if (mouseResult.consumed === data.length) {
                 return { consume: true };
