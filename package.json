@@ -1,6 +1,6 @@
 {
     "name": "pi-alternative-compositor",
-    "version": "1.0.0",
+    "version": "1.0.5",
     "description": "[Experimental] Scrollable chat viewport compositor with mouse selection and keyboard scrolling for pi.",
     "license": "MIT",
     "author": "",
@@ -27,12 +27,9 @@
     "keywords": [
         "pi-package",
         "pi",
-        "coding-agent",
         "extension",
         "compositor",
-        "scroll",
-        "tui",
-        "pi-extension"
+        "tui"
     ],
     "peerDependencies": {
         "@earendil-works/pi-coding-agent": ">=0.78.0",

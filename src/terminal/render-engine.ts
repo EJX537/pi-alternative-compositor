@@ -4,6 +4,7 @@ import {
     disableAutoWrap,
     enableAutoWrap,
     setScrollRegion,
+    resetScrollRegion,
     moveCursor,
     clearLine,
     clearToEndOfLine,
@@ -468,15 +469,36 @@ export class RenderEngine {
         }
     }
 
-    repaintScrollableViewport(width: number): void {
+    repaintScrollableViewport(
+        width: number,
+        options?: { skipClusterAndSidebar?: boolean },
+    ): void {
         if (this.hasVisibleOverlay()) return;
 
         const rawRows = this.getRawRows();
         const cluster = this.getCluster(width, rawRows);
         const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
         const start = this.updateVisibleRootWindow(scrollableRows);
+
+        // Diagnostic: some terminals (notably Ghostty) exhibit scroll lag when
+        // DEC 2026 synchronized output is combined with DECSTBM scroll regions.
+        // Setting PI_COMPOSITOR_NO_SYNC_SCROLL=1 disables synchronized output
+        // for scroll repaints only, so we can A/B test that interaction.
+        const noSyncScroll = process.env.PI_COMPOSITOR_NO_SYNC_SCROLL === "1";
+        const syncBegin = noSyncScroll ? "" : beginSynchronizedOutput();
+        const syncEnd = noSyncScroll ? "" : endSynchronizedOutput();
+
+        // Diagnostic: some terminals struggle with the volume of bytes emitted
+        // per scroll tick. When a repaint is triggered only by a scroll offset
+        // change, the fixed cluster and sidebar do not move; skipping them cuts
+        // the output volume significantly. PI_COMPOSITOR_NO_SCROLL_OPTIMIZE=1
+        // disables this optimization for A/B testing.
+        const optimizeScroll =
+            options?.skipClusterAndSidebar === true &&
+            process.env.PI_COMPOSITOR_NO_SCROLL_OPTIMIZE !== "1";
+
         let buffer =
-            beginSynchronizedOutput() +
+            syncBegin +
             disableAutoWrap() +
             setScrollRegion(1, scrollableRows) +
             moveCursor(1, 1);
@@ -496,16 +518,24 @@ export class RenderEngine {
             );
         }
 
-        buffer += buildFixedClusterPaint(
-            this.decorateCluster(cluster),
-            rawRows,
-            width,
-            this.getShowHardwareCursor(),
-        );
-        buffer += this.buildSidebarPaint();
+        if (optimizeScroll) {
+            // Reset the scroll region so subsequent terminal writes outside the
+            // scrollable area behave correctly. The cluster and sidebar are
+            // already on screen from the previous frame.
+            buffer += resetScrollRegion();
+        } else {
+            buffer += buildFixedClusterPaint(
+                this.decorateCluster(cluster),
+                rawRows,
+                width,
+                this.getShowHardwareCursor(),
+            );
+            buffer += this.buildSidebarPaint();
+        }
+
         buffer += enableAutoWrap();
         buffer += this.getMouseReportingGuard();
-        buffer += endSynchronizedOutput();
+        buffer += syncEnd;
         this.originalWrite(buffer);
     }
 

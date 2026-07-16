@@ -6,6 +6,7 @@ import { SelectionManager } from "./selection-manager.js";
 import { TerminalModeManager } from "./terminal-mode-manager.js";
 import {
     isMouseMotion,
+    isMouseRelease,
     isRootSubmitInput,
     mouseBaseButton,
     mouseScrollDelta,
@@ -63,6 +64,14 @@ export class TerminalSplitCompositor {
     private renderPassActive = false;
     private originalRowsDescriptor: PropertyDescriptor | undefined;
     private originalColumnsDescriptor: PropertyDescriptor | undefined;
+
+    // Scroll coalescing state. Some terminals (notably Ghostty) deliver wheel
+    // events in rapid separate stdin reads; each read currently triggers a full
+    // repaint. We accumulate deltas and flush once per short window.
+    private pendingScrollDelta = 0;
+    private pendingScrollOptions?: { preserveSelection?: boolean };
+    private pendingScrollTimer: ReturnType<typeof setTimeout> | null = null;
+    private lastScrollDirection = 0;
 
     // Sub-managers
     readonly collapseState = new ComponentCollapseState();
@@ -269,6 +278,7 @@ export class TerminalSplitCompositor {
         )
             return false;
 
+        this.flushPendingScroll();
         this.selectionManager.clearSelection();
         this.selectionManager.lastPress = null;
         this.selectionManager.leftPressLocation = null;
@@ -324,6 +334,7 @@ export class TerminalSplitCompositor {
 
     dispose(options: DisposeOptions = {}): void {
         if (this.disposed) return;
+        this.flushPendingScroll();
         this.disposed = true;
         this.modeManager.markDisposed();
 
@@ -400,6 +411,30 @@ export class TerminalSplitCompositor {
                 "visibleRows=",
                 this.renderEngine.currentVisibleScrollableRows,
             );
+            // Mouse wheel events often arrive in bursts from a single
+            // physical scroll gesture. First pass: classify packets and
+            // accumulate wheel deltas; dispatch non-wheel packets after any
+            // required lazy refresh so clicks operate on fresh ranges.
+            let wheelDelta = 0;
+            let hasPressOrRelease = false;
+            const base = (code: number) => mouseBaseButton(code);
+            for (const packet of mouseResult.packets) {
+                const delta = mouseScrollDelta(packet);
+                if (delta !== 0) {
+                    wheelDelta += delta;
+                    continue;
+                }
+                if (isMouseRelease(packet) || !isMouseMotion(packet)) {
+                    hasPressOrRelease = true;
+                }
+            }
+
+            // Press/release interactions must operate on the current viewport,
+            // so flush any pending wheel scroll before refreshing hit-testing.
+            if (hasPressOrRelease) {
+                this.flushPendingScroll();
+            }
+
             // Mouse hit-testing state is normally refreshed by paintFullFrame(),
             // but on fresh startup the compositor installs before Pi populates
             // the chat. If a render is missed or coalesced, the line ranges can
@@ -407,7 +442,6 @@ export class TerminalSplitCompositor {
             // operate on empty/outdated ranges. Skip scroll/motion: scroll
             // events are frequent and clearing caches every wheel tick causes
             // noticeable lag.
-            const base = (code: number) => mouseBaseButton(code);
             const needsFreshState = mouseResult.packets.some(
                 (packet) =>
                     !isMouseMotion(packet) &&
@@ -430,16 +464,10 @@ export class TerminalSplitCompositor {
                     logDebug("lazy-refresh-error:", err);
                 }
             }
-            // Mouse wheel events often arrive in bursts from a single
-            // physical scroll gesture. Coalesce their deltas and apply a
-            // single scroll + repaint instead of repainting once per tick.
-            let wheelDelta = 0;
+
+            // Second pass: dispatch non-wheel packets with fresh ranges.
             for (const packet of mouseResult.packets) {
-                const delta = mouseScrollDelta(packet);
-                if (delta !== 0) {
-                    wheelDelta += delta;
-                    continue;
-                }
+                if (mouseScrollDelta(packet) !== 0) continue;
                 this.mouseHandler.handleMousePacket(
                     packet,
                     this.renderEngine.currentVisibleRootStart,
@@ -451,8 +479,9 @@ export class TerminalSplitCompositor {
                     this.renderEngine.currentMaxScrollOffset,
                 );
             }
+
             if (wheelDelta !== 0) {
-                this.scrollBy(wheelDelta);
+                this.scheduleScrollBy(wheelDelta);
             }
             if (mouseResult.consumed === data.length) {
                 return { consume: true };
@@ -468,7 +497,7 @@ export class TerminalSplitCompositor {
         const keyboardDelta = parseKeyboardScrollDelta(data);
         if (keyboardDelta === 0) return undefined;
 
-        this.scrollBy(keyboardDelta);
+        this.scheduleScrollBy(keyboardDelta);
         return { consume: true };
     }
 
@@ -502,10 +531,68 @@ export class TerminalSplitCompositor {
         try {
             this.renderEngine.currentScrollOffset = nextOffset;
             this.renderEngine.refreshRootComponentRanges();
-            this.renderEngine.repaintScrollableViewport(width);
+            this.renderEngine.repaintScrollableViewport(width, {
+                skipClusterAndSidebar: true,
+            });
         } finally {
             this.renderEngine.setRenderPassActive(false);
         }
+    }
+
+    /**
+     * Coalesce scroll deltas across rapid input events and flush once per
+     * short window. This is especially helpful for terminals (notably Ghostty)
+     * that deliver wheel events in many separate stdin reads.
+     */
+    private scheduleScrollBy(
+        delta: number,
+        options?: { preserveSelection?: boolean },
+    ): void {
+        if (process.env.PI_COMPOSITOR_NO_SCROLL_THROTTLE === "1") {
+            this.scrollBy(delta, options);
+            return;
+        }
+
+        const direction = Math.sign(delta);
+        if (
+            this.pendingScrollDelta !== 0 &&
+            direction !== this.lastScrollDirection
+        ) {
+            // Direction changed: flush the previous batch immediately so the
+            // viewport doesn't jump in the wrong direction later.
+            this.flushPendingScroll();
+        }
+
+        this.pendingScrollDelta += delta;
+        this.pendingScrollOptions ??= options;
+
+        if (this.pendingScrollTimer) return;
+
+        this.pendingScrollTimer = setTimeout(() => {
+            this.flushPendingScroll();
+        }, 8);
+
+        if (
+            typeof this.pendingScrollTimer === "object" &&
+            "unref" in this.pendingScrollTimer
+        ) {
+            this.pendingScrollTimer.unref();
+        }
+    }
+
+    private flushPendingScroll(): void {
+        if (this.pendingScrollTimer) {
+            clearTimeout(this.pendingScrollTimer);
+            this.pendingScrollTimer = null;
+        }
+        if (this.pendingScrollDelta === 0) return;
+
+        const delta = this.pendingScrollDelta;
+        const options = this.pendingScrollOptions;
+        this.pendingScrollDelta = 0;
+        this.pendingScrollOptions = undefined;
+        this.lastScrollDirection = Math.sign(delta);
+        this.scrollBy(delta, options);
     }
 
     private jumpToRootTarget(
@@ -519,6 +606,7 @@ export class TerminalSplitCompositor {
         )
             return false;
 
+        this.flushPendingScroll();
         const start = this.renderEngine.currentVisibleRootStart;
         const candidates =
             direction === "previous"

@@ -61,6 +61,7 @@ export class TerminalModeManager {
     private mouseReportingResumeTimer: ReturnType<typeof setTimeout> | null =
         null;
     private clipboardRestoreTimer: ReturnType<typeof setTimeout> | null = null;
+    private mouseReportingActive = false;
     private disposed = false;
 
     constructor(
@@ -158,7 +159,7 @@ export class TerminalModeManager {
             eraseDisplay() +
             homeCursor() +
             resetScrollRegion() +
-            (this.mouseScroll ? disableMouseReporting() : "") +
+            (this.mouseScroll ? this.emitDisableMouseReporting() : "") +
             (activeMode ? disableExtendedKeyboardMode(activeMode) : "") +
             disableBracketedPaste() +
             enableAlternateScrollMode() +
@@ -184,9 +185,24 @@ export class TerminalModeManager {
 
     /** Return the escape sequence to (re-)enable mouse reporting if applicable. */
     mouseReportingStateGuard(): string {
-        return this.mouseScroll && !this.mouseReportingResumeTimer
-            ? enableMouseReporting()
-            : "";
+        if (
+            this.mouseScroll &&
+            !this.mouseReportingResumeTimer &&
+            !this.mouseReportingActive
+        ) {
+            return this.emitEnableMouseReporting();
+        }
+        return "";
+    }
+
+    private emitEnableMouseReporting(): string {
+        this.mouseReportingActive = true;
+        return enableMouseReporting();
+    }
+
+    private emitDisableMouseReporting(): string {
+        this.mouseReportingActive = false;
+        return disableMouseReporting();
     }
 
     /**
@@ -207,7 +223,7 @@ export class TerminalModeManager {
 
         this.originalWrite(
             beginSynchronizedOutput() +
-                disableMouseReporting() +
+                this.emitDisableMouseReporting() +
                 endSynchronizedOutput(),
         );
         this.mouseReportingResumeTimer = setTimeout(() => {
@@ -215,7 +231,7 @@ export class TerminalModeManager {
             if (!this.disposed) {
                 this.originalWrite(
                     beginSynchronizedOutput() +
-                        enableMouseReporting() +
+                        this.emitEnableMouseReporting() +
                         endSynchronizedOutput(),
                 );
             }
