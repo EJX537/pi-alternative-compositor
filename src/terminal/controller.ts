@@ -7,6 +7,7 @@ import { TerminalModeManager } from "./terminal-mode-manager.js";
 import {
     isMouseMotion,
     isRootSubmitInput,
+    mouseBaseButton,
     parseKeyboardScrollDelta,
     parseSgrMousePackets,
 } from "./input.js";
@@ -401,10 +402,16 @@ export class TerminalSplitCompositor {
             // Mouse hit-testing state is normally refreshed by paintFullFrame(),
             // but on fresh startup the compositor installs before Pi populates
             // the chat. If a render is missed or coalesced, the line ranges can
-            // stay stale. Refresh lazily on real mouse interaction (press,
-            // release, scroll) so clicks never operate on empty/outdated ranges.
+            // stay stale. Refresh lazily on press/release so clicks never
+            // operate on empty/outdated ranges. Skip scroll/motion: scroll
+            // events are frequent and clearing caches every wheel tick causes
+            // noticeable lag.
+            const base = (code: number) => mouseBaseButton(code);
             const needsFreshState = mouseResult.packets.some(
-                (packet) => !isMouseMotion(packet),
+                (packet) =>
+                    !isMouseMotion(packet) &&
+                    base(packet.code) !== 64 &&
+                    base(packet.code) !== 65,
             );
             if (needsFreshState && !this.renderPassActive) {
                 try {
