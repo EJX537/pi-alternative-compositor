@@ -167,7 +167,237 @@ describe("Async-startup collapse", () => {
         compositor.dispose();
     });
 
-    it("(c) on event.reason='new' there are NO collapsible components in the chat", () => {
+    it("(c) collapsible children added after install are clickable after render", () => {
+        const { options } = createOptions();
+
+        const expanded: boolean[] = [];
+        const tool = {
+            toolCallId: "tool-late",
+            toolName: "read",
+            expanded: true,
+            setExpanded: (value: boolean) => expanded.push(value),
+            render: () => ["tool output"],
+        };
+
+        const tui = options.tui as unknown as {
+            children: unknown[];
+            render: (width: number) => string[];
+        };
+        tui.children = [];
+        tui.render = () => [];
+
+        const compositor = new TerminalSplitCompositor(options);
+        const internal = compositor as unknown as {
+            handleMousePacket(packet: {
+                code: number;
+                col: number;
+                row: number;
+                final: "M" | "m";
+            }): void;
+            renderEngine: {
+                currentRootComponentLineRanges: unknown[];
+            };
+        };
+
+        compositor.install();
+
+        // Initially empty — nothing to toggle.
+        expect(internal.renderEngine.currentRootComponentLineRanges.length).toBe(0);
+
+        // Simulate Pi populating the chat after session_start.
+        tui.children = [tool];
+        tui.render(80);
+
+        // Now the ranges should include the collapsible tool.
+        expect(
+            compositor.collapseState.isCollapsibleComponent(
+                compositor.getRootComponentAtLine(0)?.component,
+            ),
+        ).toBe(true);
+
+        internal.handleMousePacket(leftPress(1, 1));
+        internal.handleMousePacket(leftRelease(1, 1));
+
+        expect(expanded).toEqual([false]);
+
+        compositor.dispose();
+    });
+
+    it("(d) collapsible children added after install are clickable after doRender", () => {
+        const { options } = createOptions();
+
+        const expanded: boolean[] = [];
+        const tool = {
+            toolCallId: "tool-late-dorender",
+            toolName: "read",
+            expanded: true,
+            setExpanded: (value: boolean) => expanded.push(value),
+            render: () => ["tool output"],
+        };
+
+        const tui = options.tui as unknown as {
+            children: unknown[];
+            render: (width: number) => string[];
+            doRender: () => void;
+        };
+        tui.children = [];
+
+        const compositor = new TerminalSplitCompositor(options);
+        const internal = compositor as unknown as {
+            handleMousePacket(packet: {
+                code: number;
+                col: number;
+                row: number;
+                final: "M" | "m";
+            }): void;
+            renderEngine: {
+                currentRootComponentLineRanges: unknown[];
+            };
+        };
+
+        compositor.install();
+
+        // Initially empty — nothing to toggle.
+        expect(internal.renderEngine.currentRootComponentLineRanges.length).toBe(0);
+
+        // Simulate Pi populating the chat after session_start, then the first
+        // paintFullFrame() firing via the patched doRender().
+        tui.children = [tool];
+        tui.doRender();
+
+        // Now the ranges should include the collapsible tool.
+        expect(
+            compositor.collapseState.isCollapsibleComponent(
+                compositor.getRootComponentAtLine(0)?.component,
+            ),
+        ).toBe(true);
+
+        internal.handleMousePacket(leftPress(1, 1));
+        internal.handleMousePacket(leftRelease(1, 1));
+
+        expect(expanded).toEqual([false]);
+
+        compositor.dispose();
+    });
+
+    it("(f) collapsible nested children added after install are clickable after doRender", () => {
+        const { options } = createOptions();
+
+        const expanded: boolean[] = [];
+        const tool = {
+            toolCallId: "tool-nested",
+            toolName: "read",
+            expanded: true,
+            setExpanded: (value: boolean) => expanded.push(value),
+            render: () => ["tool output"],
+        };
+        const chat = {
+            children: [tool],
+            render: () => tool.render(80),
+        };
+
+        const tui = options.tui as unknown as {
+            children: unknown[];
+            render: (width: number) => string[];
+            doRender: () => void;
+        };
+        tui.children = [chat];
+        tui.render = () => chat.render();
+
+        const compositor = new TerminalSplitCompositor(options);
+        const internal = compositor as unknown as {
+            handleMousePacket(packet: {
+                code: number;
+                col: number;
+                row: number;
+                final: "M" | "m";
+            }): void;
+            renderEngine: {
+                currentRootComponentLineRanges: unknown[];
+            };
+        };
+
+        // Mimic lifecycle.setup() which calls setClusterStartIndex.
+        compositor.setClusterStartIndex(1);
+        compositor.install();
+
+        // The chat is initially empty of collapsible content? No, it has the tool.
+        // But let's simulate fresh-start: chat has no messages initially, then a
+        // message is added.
+        const rangesBefore = compositor.getRootComponentAtLine(0);
+        expect(rangesBefore?.component).toBe(tool);
+
+        // Now simulate the chat getting a new child after install.
+        const tool2 = {
+            toolCallId: "tool-nested-2",
+            toolName: "read",
+            expanded: true,
+            setExpanded: (value: boolean) => expanded.push(value),
+            render: () => ["tool output 2"],
+        };
+        chat.children = [tool, tool2];
+        chat.render = () => [tool.render(80), tool2.render(80)].flat();
+        tui.render = () => chat.render();
+        tui.doRender();
+
+        const rangesAfter = compositor.getRootComponentAtLine(1);
+        expect(rangesAfter?.component).toBe(tool2);
+
+        internal.handleMousePacket(leftPress(2, 1));
+        internal.handleMousePacket(leftRelease(2, 1));
+
+        expect(expanded).toEqual([false]);
+
+        compositor.dispose();
+    });
+
+    it("(e) mouse input lazily refreshes stale ranges before toggling", () => {
+        const { options } = createOptions();
+
+        const expanded: boolean[] = [];
+        const tool = {
+            toolCallId: "tool-lazy",
+            toolName: "read",
+            expanded: true,
+            setExpanded: (value: boolean) => expanded.push(value),
+            render: () => ["tool output"],
+        };
+
+        const tui = options.tui as unknown as {
+            children: unknown[];
+            render: (width: number) => string[];
+        };
+        tui.children = [];
+        tui.render = () => [];
+
+        const compositor = new TerminalSplitCompositor(options);
+        const internal = compositor as unknown as {
+            handleInput: (data: string) => { consume?: boolean; data?: string } | undefined;
+            renderEngine: {
+                currentRootComponentLineRanges: unknown[];
+            };
+        };
+
+        compositor.install();
+
+        // Initially empty ranges.
+        expect(internal.renderEngine.currentRootComponentLineRanges.length).toBe(0);
+
+        // Pi populates the chat, but no render fires (simulating a missed
+        // or coalesced requestRender in production).
+        tui.children = [tool];
+        tui.render = () => tool.render();
+
+        // A real mouse click arrives. handleInput should lazily refresh the
+        // root window state before dispatching to the mouse handler.
+        const consumed = internal.handleInput("\x1b[<0;1;1M\x1b[<0;1;1m");
+        expect(consumed?.consume).toBe(true);
+        expect(expanded).toEqual([false]);
+
+        compositor.dispose();
+    });
+
+    it("(f) on event.reason='new' there are NO collapsible components in the chat", () => {
         // This test demonstrates that on a truly new session, the TUI has no
         // children with collapsible properties (no assistant components, no
         // tool components), so even if rendering works, there's nothing to

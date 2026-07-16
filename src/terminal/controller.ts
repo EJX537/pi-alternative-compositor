@@ -5,6 +5,7 @@ import { RenderEngine } from "./render-engine.js";
 import { SelectionManager } from "./selection-manager.js";
 import { TerminalModeManager } from "./terminal-mode-manager.js";
 import {
+    isMouseMotion,
     isRootSubmitInput,
     parseKeyboardScrollDelta,
     parseSgrMousePackets,
@@ -379,6 +380,23 @@ export class TerminalSplitCompositor {
             ? parseSgrMousePackets(data)
             : null;
         if (mouseResult && mouseResult.packets.length > 0) {
+            // Mouse hit-testing state is normally refreshed by paintFullFrame(),
+            // but on fresh startup the compositor installs before Pi populates
+            // the chat. If a render is missed or coalesced, the line ranges can
+            // stay stale. Refresh lazily on real mouse interaction (press,
+            // release, scroll) so clicks never operate on empty/outdated ranges.
+            const needsFreshState = mouseResult.packets.some(
+                (packet) => !isMouseMotion(packet),
+            );
+            if (needsFreshState && !this.renderPassActive) {
+                try {
+                    this.renderEngine.refreshRootWindow(
+                        this.renderEngine.getSidebarLayout().mainWidth,
+                    );
+                } catch {
+                    // Ignore: the next paintFullFrame will repair state.
+                }
+            }
             for (const packet of mouseResult.packets) {
                 this.mouseHandler.handleMousePacket(
                     packet,
