@@ -16,11 +16,11 @@ export class SidebarState {
                 const builtInLines = [
                     line("COMPOSITOR"),
                     separator,
-                    line("Session active"),
-                    line("PgUp/PgDn to scroll"),
-                    line("Drag to select"),
-                    line(""),
-                    line("This is just to showcase its possible"),
+                    line("Just to showcase its possible"),
+                    separator,
+                    line("Originally intended to copy what"),
+                    line("OpenCode displays here but I don't"),
+                    line("actually read is so (idk)"),
                 ];
                 return [
                     ...builtInLines,

@@ -53,6 +53,92 @@ export function isToolComponent(component: unknown): component is ToolComponent 
     );
 }
 
+/**
+ * Check whether the clicked line falls on the thinking-block portion of an
+ * assistant message component, by scanning the component path for known
+ * thinking-block markers.
+ *
+ * - **Visible** thinking block: a `Markdown` whose `defaultTextStyle.italic`
+ *   is `true`.  Pi's `AssistantMessageComponent` always creates thinking
+ *   Markdown instances with `{italic: true, color: thinkingText}`.
+ * - **Hidden** thinking block (already collapsed): a `Text` component
+ *   ("Thinking…" label).  Text components have no `children` array, no
+ *   `defaultTextStyle`, no `theme` (unlike Markdown), and no `lines`
+ *   (unlike Spacer).
+ *
+ * Response-text Markdown instances have NO `defaultTextStyle`, so they
+ * never match the first check.  Error-message Text instances also lack
+ * `defaultTextStyle`, but they appear AFTER response text while the
+ * hidden thinking label appears BEFORE it, so the first non-Spacer child
+ * of `contentContainer` is unambiguous.
+ *
+ * Falls back to `true` (allow toggle) when the assistant has no deeper
+ * children in the path (simplified test mocks).
+ */
+function isClickOnThinkingBlock(
+    path: readonly RootComponentLineRange[],
+    assistantIndex: number,
+): boolean {
+    // No deeper components → synthetic test mock; allow toggle.
+    if (assistantIndex + 1 >= path.length) return true;
+
+    // Scan from innermost outward for a visible thinking marker.
+    for (let i = path.length - 1; i > assistantIndex; i--) {
+        const comp = path[i].component;
+        if (!comp || typeof comp !== "object") continue;
+        const candidate = comp as Record<string, unknown>;
+
+        // --- Visible thinking: Markdown with italic defaultTextStyle ---
+        const ds = candidate.defaultTextStyle;
+        if (
+            typeof ds === "object" &&
+            ds !== null &&
+            (ds as Record<string, unknown>).italic === true
+        ) {
+            return true;
+        }
+
+        // --- Hidden thinking: Text component ---
+        // Not a Container (no children), not a Markdown (no theme),
+        // not a Spacer (no lines).
+        if (
+            !Array.isArray(candidate.children) &&
+            candidate.defaultTextStyle === undefined &&
+            candidate.lines === undefined &&
+            candidate.theme === undefined &&
+            typeof candidate.render === "function"
+        ) {
+            // Verify this Text is truly the hidden thinking label by
+            // checking it is the first non-Spacer child of contentContainer.
+            const containerRange = path[assistantIndex + 1];
+            if (containerRange) {
+                const container = containerRange.component as
+                    | { children?: unknown[] }
+                    | undefined;
+                if (
+                    container &&
+                    Array.isArray(container.children) &&
+                    container.children.length > 0
+                ) {
+                    const firstNonSpacer = container.children.find(
+                        (c) =>
+                            typeof c === "object" &&
+                            c !== null &&
+                            (c as Record<string, unknown>).lines ===
+                                undefined,
+                    );
+                    if (firstNonSpacer) {
+                        return firstNonSpacer === comp;
+                    }
+                }
+            }
+            // If we can't find contentContainer children, allow toggle.
+            return true;
+        }
+    }
+    return false;
+}
+
 /** Extension-owned local collapse state, independent of Pi's global toggle. */
 export class ComponentCollapseState {
     /**
@@ -120,6 +206,13 @@ export class ComponentCollapseState {
             isAssistantComponent(range.component),
         );
         if (!assistant || !isAssistantComponent(assistant.component)) return false;
+
+        // Only toggle when the click is on the thinking block portion of the
+        // assistant message, not on response text or other non-thinking content.
+        const assistantIndex = path.indexOf(assistant);
+        if (assistantIndex >= 0 && clickedLine !== undefined) {
+          if (!isClickOnThinkingBlock(path, assistantIndex)) return false;
+        }
 
         const message = assistant.component.lastMessage;
         const key = assistantOverrideKey(message);
