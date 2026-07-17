@@ -54,9 +54,7 @@ export function isToolComponent(component: unknown): component is ToolComponent 
 }
 
 /**
- * Check whether the clicked line falls on the thinking-block portion of an
- * assistant message component, by scanning the component path for known
- * thinking-block markers.
+ * Check whether a component looks like a thinking-block marker.
  *
  * - **Visible** thinking block: a `Markdown` whose `defaultTextStyle.italic`
  *   is `true`.  Pi's `AssistantMessageComponent` always creates thinking
@@ -65,78 +63,128 @@ export function isToolComponent(component: unknown): component is ToolComponent 
  *   ("Thinking…" label).  Text components have no `children` array, no
  *   `defaultTextStyle`, no `theme` (unlike Markdown), and no `lines`
  *   (unlike Spacer).
+ */
+function isThinkingMarker(comp: unknown): boolean {
+    if (!comp || typeof comp !== "object") return false;
+    const c = comp as Record<string, unknown>;
+
+    // Visible thinking: Markdown with italic defaultTextStyle.
+    const ds = c.defaultTextStyle;
+    if (
+        typeof ds === "object" &&
+        ds !== null &&
+        (ds as Record<string, unknown>).italic === true
+    ) {
+        return true;
+    }
+
+    // Hidden thinking: Text component (no children, no defaultTextStyle,
+    // no theme, no lines, but has a render function).
+    if (
+        !Array.isArray(c.children) &&
+        c.defaultTextStyle === undefined &&
+        c.lines === undefined &&
+        c.theme === undefined &&
+        typeof c.render === "function"
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * Walk the assistant's direct children, render each one, and check whether
+ * `clickedLine` falls on a thinking-marker child.  This is used as a fallback
+ * when the range-mapper path doesn't have nested descendants for the assistant
+ * (e.g. because appendDescendants could not match child output inside the
+ * parent's rendered lines).
+ */
+function isClickOnThinkingBlockByWalking(
+    assistantComponent: unknown,
+    assistantStartLine: number,
+    clickedLine: number,
+    width: number,
+): boolean {
+    const queue: { comp: unknown; startLine: number }[] = [
+        { comp: assistantComponent, startLine: assistantStartLine },
+    ];
+
+    while (queue.length > 0) {
+        const item = queue.shift()!;
+        if (isThinkingMarker(item.comp)) {
+            return true;
+        }
+
+        const children = (item.comp as { children?: unknown[] }).children;
+        if (!Array.isArray(children) || children.length === 0) continue;
+
+        // Render each child to learn its height, then recurse into the one
+        // whose line range contains clickedLine.
+        let cursor = item.startLine;
+        for (const child of children) {
+            if (!child || typeof child !== "object") continue;
+            const renderable = child as { render?: (w: number) => string[] };
+            if (typeof renderable.render !== "function") continue;
+
+            let childLines: string[];
+            try {
+                childLines = renderable.render(width);
+            } catch {
+                continue;
+            }
+            const childHeight = childLines.length;
+            if (childHeight === 0) continue;
+
+            if (
+                clickedLine >= cursor &&
+                clickedLine < cursor + childHeight
+            ) {
+                // The click is inside this child — check it and recurse.
+                queue.push({ comp: child, startLine: cursor });
+                break; // only one child can contain the click line
+            }
+            cursor += childHeight;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Check whether the clicked line falls on the thinking-block portion of an
+ * assistant message component.
  *
- * Response-text Markdown instances have NO `defaultTextStyle`, so they
- * never match the first check.  Error-message Text instances also lack
- * `defaultTextStyle`, but they appear AFTER response text while the
- * hidden thinking label appears BEFORE it, so the first non-Spacer child
- * of `contentContainer` is unambiguous.
- *
- * Falls back to `true` (allow toggle) when the assistant has no deeper
- * children in the path (simplified test mocks).
+ * First tries the range-mapper path (fast: components already mapped to lines).
+ * When the path has no nested descendants for the assistant, falls back to
+ * walking the assistant's component children directly and rendering each one
+ * to locate the click.
  */
 function isClickOnThinkingBlock(
     path: readonly RootComponentLineRange[],
     assistantIndex: number,
+    clickedLine: number,
+    mainWidth: number,
 ): boolean {
-    // No deeper components → synthetic test mock; allow toggle.
-    if (assistantIndex + 1 >= path.length) return true;
+    const assistant = path[assistantIndex];
 
-    // Scan from innermost outward for a visible thinking marker.
-    for (let i = path.length - 1; i > assistantIndex; i--) {
-        const comp = path[i].component;
-        if (!comp || typeof comp !== "object") continue;
-        const candidate = comp as Record<string, unknown>;
-
-        // --- Visible thinking: Markdown with italic defaultTextStyle ---
-        const ds = candidate.defaultTextStyle;
-        if (
-            typeof ds === "object" &&
-            ds !== null &&
-            (ds as Record<string, unknown>).italic === true
-        ) {
-            return true;
+    // Fast path: scan range-mapper path components from innermost outward.
+    if (assistantIndex + 1 < path.length) {
+        for (let i = path.length - 1; i > assistantIndex; i--) {
+            if (isThinkingMarker(path[i].component)) return true;
         }
-
-        // --- Hidden thinking: Text component ---
-        // Not a Container (no children), not a Markdown (no theme),
-        // not a Spacer (no lines).
-        if (
-            !Array.isArray(candidate.children) &&
-            candidate.defaultTextStyle === undefined &&
-            candidate.lines === undefined &&
-            candidate.theme === undefined &&
-            typeof candidate.render === "function"
-        ) {
-            // Verify this Text is truly the hidden thinking label by
-            // checking it is the first non-Spacer child of contentContainer.
-            const containerRange = path[assistantIndex + 1];
-            if (containerRange) {
-                const container = containerRange.component as
-                    | { children?: unknown[] }
-                    | undefined;
-                if (
-                    container &&
-                    Array.isArray(container.children) &&
-                    container.children.length > 0
-                ) {
-                    const firstNonSpacer = container.children.find(
-                        (c) =>
-                            typeof c === "object" &&
-                            c !== null &&
-                            (c as Record<string, unknown>).lines ===
-                                undefined,
-                    );
-                    if (firstNonSpacer) {
-                        return firstNonSpacer === comp;
-                    }
-                }
-            }
-            // If we can't find contentContainer children, allow toggle.
-            return true;
-        }
+        // Path has nested components but none are thinking markers — the
+        // click is on response text or some other non-thinking child.
+        return false;
     }
-    return false;
+
+    // No nested descendants in path: walk children directly.
+    return isClickOnThinkingBlockByWalking(
+        assistant.component,
+        assistant.startLine,
+        clickedLine,
+        mainWidth,
+    );
 }
 
 /** Extension-owned local collapse state, independent of Pi's global toggle. */
@@ -173,6 +221,7 @@ export class ComponentCollapseState {
     toggle(
         path: readonly RootComponentLineRange[],
         clickedLine?: number,
+        mainWidth?: number,
     ): boolean {
         const tool = path.toReversed().find((range) =>
             isToolComponent(range.component),
@@ -211,7 +260,15 @@ export class ComponentCollapseState {
         // assistant message, not on response text or other non-thinking content.
         const assistantIndex = path.indexOf(assistant);
         if (assistantIndex >= 0 && clickedLine !== undefined) {
-          if (!isClickOnThinkingBlock(path, assistantIndex)) return false;
+          if (
+            !isClickOnThinkingBlock(
+              path,
+              assistantIndex,
+              clickedLine,
+              mainWidth ?? 80,
+            )
+          )
+            return false;
         }
 
         const message = assistant.component.lastMessage;

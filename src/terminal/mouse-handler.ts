@@ -37,7 +37,7 @@ export class MouseHandler {
         delta: number,
         options?: { preserveSelection?: boolean },
     ) => void;
-    private readonly repaint: () => void;
+    private readonly repaint: (options?: { refreshRoot?: boolean }) => void;
 
     constructor(params: {
         selectionManager: SelectionManager;
@@ -53,7 +53,7 @@ export class MouseHandler {
             delta: number,
             options?: { preserveSelection?: boolean },
         ) => void;
-        repaint: () => void;
+        repaint: (options?: { refreshRoot?: boolean }) => void;
     }) {
         this.selectionManager = params.selectionManager;
         this.modeManager = params.modeManager;
@@ -114,7 +114,7 @@ export class MouseHandler {
             this.selectionManager.isDragging &&
             isMouseRelease(packet)
         ) {
-            this.handleRelease(location, packet, visibleRootStart, visibleScrollableRows, visibleRootLines, visibleClusterLines);
+            this.handleRelease(location, packet, visibleRootStart, visibleScrollableRows, visibleRootLines, visibleClusterLines, sidebarMainWidth);
             return true;
         }
 
@@ -212,6 +212,7 @@ export class MouseHandler {
         visibleScrollableRows: number,
         visibleRootLines: string[],
         visibleClusterLines: string[],
+        sidebarMainWidth: number,
     ): void {
         if (
             !this.selectionManager.hadDrag &&
@@ -225,14 +226,14 @@ export class MouseHandler {
         ) {
             const path = this.getRootComponentPathAtLine(location.point.line);
             logDebug("release-toggle: path=", path.length, "line=", location.point.line);
-            const toggled = this.collapseState.toggle(path, location.point.line);
+            const toggled = this.collapseState.toggle(path, location.point.line, sidebarMainWidth);
             logDebug("release-toggle-result:", toggled);
             if (toggled) {
                 this.selectionManager.clearSelection();
                 this.selectionManager.lastPress = null;
                 this.selectionManager.leftPressLocation = null;
                 this.selectionManager.hadDrag = false;
-                this.repaint();
+                this.repaint({ refreshRoot: true });
                 return;
             }
         }

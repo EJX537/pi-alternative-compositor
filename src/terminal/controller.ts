@@ -73,6 +73,11 @@ export class TerminalSplitCompositor {
     private pendingScrollTimer: ReturnType<typeof setTimeout> | null = null;
     private lastScrollDirection = 0;
 
+    // True after the first lazy force-refresh following install, so that
+    // subsequent mouse events can use the lightweight re-map path without
+    // clearing caches on every click.
+    private rootStateRefreshedAfterInstall = false;
+
     // Sub-managers
     readonly collapseState = new ComponentCollapseState();
     readonly rangeMapper = new ComponentRangeMapper();
@@ -140,7 +145,7 @@ export class TerminalSplitCompositor {
             getVisibleClusterLines: () =>
                 this.renderEngine.currentVisibleClusterLines,
             scrollBy: (delta, options) => this.scrollBy(delta, options),
-            repaint: () => this.repaint(),
+            repaint: (options) => this.repaint(options),
         });
     }
 
@@ -474,15 +479,39 @@ export class TerminalSplitCompositor {
             );
             if (needsFreshRanges && !this.renderPassActive) {
                 try {
-                    this.renderEngine.refreshRootComponentRanges();
-                    logDebug(
-                        "lazy-ranges-refresh: ranges=",
-                        this.renderEngine.currentRootComponentLineRanges.length,
-                        "visibleRows=",
-                        this.renderEngine.currentVisibleScrollableRows,
-                    );
+                    // On fresh startup the eager refreshRootWindow() during
+                    // install sees an empty chat, so rootLines and the
+                    // component line ranges are stale.  Force a one-shot
+                    // full refresh from the LIVE component tree so that
+                    // messages/tools added after session_start are included
+                    // in hit-testing.  After that, re-mapping the existing
+                    // rootLines is sufficient and avoids the overhead (and
+                    // potential descendant-matching failures) of clearing
+                    // caches on every click.
+                    if (!this.rootStateRefreshedAfterInstall) {
+                        const mainWidth =
+                            this.renderEngine.getSidebarLayout().mainWidth;
+                        this.renderEngine.forceRefreshRootState(mainWidth);
+                        this.rootStateRefreshedAfterInstall = true;
+                        logDebug(
+                            "lazy-force-refresh: ranges=",
+                            this.renderEngine.currentRootComponentLineRanges.length,
+                            "rootLines=",
+                            this.renderEngine.currentRootLines.length,
+                            "visibleRows=",
+                            this.renderEngine.currentVisibleScrollableRows,
+                        );
+                    } else {
+                        this.renderEngine.refreshRootComponentRanges();
+                        logDebug(
+                            "lazy-ranges-refresh: ranges=",
+                            this.renderEngine.currentRootComponentLineRanges.length,
+                            "visibleRows=",
+                            this.renderEngine.currentVisibleScrollableRows,
+                        );
+                    }
                 } catch (err) {
-                    logDebug("lazy-ranges-refresh-error:", err);
+                    logDebug("lazy-refresh-error:", err);
                 }
             }
 
@@ -697,9 +726,16 @@ export class TerminalSplitCompositor {
         this.tui.requestRender();
     }
 
-    private repaint(): void {
+    private repaint(options?: { refreshRoot?: boolean }): void {
         if (this.disposed) return;
         const width = this.renderEngine.getSidebarLayout().mainWidth;
+        if (options?.refreshRoot) {
+            // After a collapse/expand toggle the component tree has changed
+            // (e.g. thinking block hidden/shown), so refresh rootLines from
+            // the live tree before painting.  Without this the viewport shows
+            // stale content and subsequent hit-testing uses wrong line ranges.
+            this.renderEngine.refreshRootWindow(width);
+        }
         this.renderEngine.repaintScrollableViewport(width);
     }
 

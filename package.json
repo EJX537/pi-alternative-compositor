@@ -1,9 +1,9 @@
 {
     "name": "pi-alternative-compositor",
-    "version": "1.0.5",
+    "version": "1.0.6",
     "description": "[Experimental] Scrollable chat viewport compositor with mouse selection and keyboard scrolling for pi.",
     "license": "MIT",
-    "author": "",
+    "author": "Ejx537",
     "type": "module",
     "main": "./src/index.ts",
     "types": "./src/index.ts",
