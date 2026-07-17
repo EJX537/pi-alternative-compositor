@@ -131,6 +131,7 @@ export class ComponentRangeMapper {
             });
 
         let searchFrom = 0;
+        let fallbackCursor = 0;
         for (const { component, lines } of rendered) {
             const lineCount = lines.length;
             let childStart: number;
@@ -143,11 +144,13 @@ export class ComponentRangeMapper {
                     searchFrom,
                 );
                 if (found === -1) {
-                    // Cannot reliably locate this child; skip it and any
-                    // subsequent children that overlap the same region.
-                    continue;
+                    // Line matching failed (e.g. parent wraps children with
+                    // border characters). Fall back to accumulation-based
+                    // positioning so the child is still discoverable.
+                    childStart = parentStart + fallbackCursor;
+                } else {
+                    childStart = parentStart + found;
                 }
-                childStart = parentStart + found;
             }
             const endLine = childStart + lineCount;
             if (endLine > minLine && childStart < maxLine) {
@@ -169,6 +172,7 @@ export class ComponentRangeMapper {
             searchFrom = canUseFastPath
                 ? searchFrom + lineCount
                 : Math.max(searchFrom, childStart - parentStart + lineCount);
+            fallbackCursor += lineCount;
         }
     }
 

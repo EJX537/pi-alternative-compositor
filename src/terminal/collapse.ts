@@ -196,6 +196,12 @@ export class ComponentCollapseState {
     private readonly assistantOverrides = new Map<string | object, boolean>();
     private readonly toolOverrides = new Map<string, boolean>();
 
+    /** Fallback root-children supplier for toggle() hit-testing. */
+    setRootChildrenSupplier(fn: () => readonly unknown[]): void {
+        this.rootChildrenSupplier = fn;
+    }
+    private rootChildrenSupplier: (() => readonly unknown[]) | null = null;
+
     /** Most recent explicit toggle, consumed by the render engine for anchoring. */
     private lastToggled: {
         component: object;
@@ -223,34 +229,39 @@ export class ComponentCollapseState {
         clickedLine?: number,
         mainWidth?: number,
     ): boolean {
+        // 1) Path-based tool lookup (fast path).
         const tool = path.toReversed().find((range) =>
             isToolComponent(range.component),
         );
         if (tool && isToolComponent(tool.component)) {
-            const id = tool.component.toolCallId;
-            // The local override is the source of truth. Pi rebuilds components
-            // frequently, so `expanded` on the instance may reflect a default
-            // rather than the last toggled state.
-            const override = this.toolOverrides.get(id);
-            const currentlyCollapsed =
-                override !== undefined
-                    ? override
-                    : !(tool.component.expanded ?? true);
-            const nextCollapsed = !currentlyCollapsed;
-            this.toolOverrides.set(id, nextCollapsed);
-            this.lastToggled = {
-                component: tool.component,
-                kind: "tool",
-                collapsed: nextCollapsed,
-                // For small tool headers the component startLine is usually
-                // identical to the click line, but using the click line keeps
-                // behavior consistent with assistant/thinking toggles.
-                startLine: clickedLine ?? tool.startLine,
-            };
-            tool.component.setExpanded(!nextCollapsed);
-            return true;
+            return this.performToolToggle(tool.component, clickedLine ?? tool.startLine);
         }
 
+        // 2) Fallback: walk root children directly when the range-mapper
+        //    path does not contain the tool (appendDescendants mismatch).
+        const roots = this.rootChildrenSupplier?.();
+        if (clickedLine !== undefined && roots && roots.length > 0) {
+            const width = mainWidth ?? 80;
+            let cursor = 0;
+            for (const child of roots) {
+                if (!child || typeof child !== "object") continue;
+                const renderable = child as { render?: (w: number) => string[] };
+                if (typeof renderable.render !== "function") continue;
+                let lines: string[];
+                try { lines = renderable.render(width); } catch { continue; }
+                const height = lines.length;
+                if (clickedLine >= cursor && clickedLine < cursor + height) {
+                    if (isToolComponent(child)) {
+                        return this.performToolToggle(child, clickedLine);
+                    }
+                    // Click landed on a non-tool root child.
+                    break;
+                }
+                cursor += height;
+            }
+        }
+
+        // 3) Assistant / thinking-block toggle.
         const assistant = path.toReversed().find((range) =>
             isAssistantComponent(range.component),
         );
@@ -291,6 +302,33 @@ export class ComponentCollapseState {
             startLine: clickedLine ?? assistant.startLine,
         };
         assistant.component.setHideThinkingBlock(nextCollapsed);
+        return true;
+    }
+
+    /**
+     * Execute a tool collapse/expand toggle on the given component.
+     * Extracted so both the range-mapper fast path and the
+     * root-child-walking fallback share the same logic.
+     */
+    private performToolToggle(
+        tool: ToolComponent,
+        startLine: number,
+    ): boolean {
+        const id = tool.toolCallId;
+        const override = this.toolOverrides.get(id);
+        const currentlyCollapsed =
+            override !== undefined
+                ? override
+                : !(tool.expanded ?? true);
+        const nextCollapsed = !currentlyCollapsed;
+        this.toolOverrides.set(id, nextCollapsed);
+        this.lastToggled = {
+            component: tool,
+            kind: "tool",
+            collapsed: nextCollapsed,
+            startLine,
+        };
+        tool.setExpanded(!nextCollapsed);
         return true;
     }
 

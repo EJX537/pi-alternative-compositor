@@ -138,6 +138,12 @@ export class RenderEngine {
         this.rangeMapper = params.rangeMapper;
         this.selectionManager = params.selectionManager;
         this.getMouseReportingGuard = params.getMouseReportingGuard;
+
+        // Register a supplier so toggle() can walk root children directly
+        // as a fallback when the range-mapper path is shallow.
+        this.collapseState.setRootChildrenSupplier(() =>
+            this.getRootChildren(),
+        );
     }
 
     // ── Accessors for controller ────────────────────────────
