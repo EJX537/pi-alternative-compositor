@@ -138,12 +138,6 @@ export class RenderEngine {
         this.rangeMapper = params.rangeMapper;
         this.selectionManager = params.selectionManager;
         this.getMouseReportingGuard = params.getMouseReportingGuard;
-
-        // Register a supplier so toggle() can walk root children directly
-        // as a fallback when the range-mapper path is shallow.
-        this.collapseState.setRootChildrenSupplier(() =>
-            this.getRootChildren(),
-        );
     }
 
     // ── Accessors for controller ────────────────────────────
@@ -712,6 +706,12 @@ export class RenderEngine {
      * hit-testing stays accurate for the newly visible viewport.
      */
     refreshRootComponentRanges(): void {
+        // Clear the range-mapper line cache so getLines() re-renders
+        // every component fresh.  This is necessary because Pi may update
+        // component state (e.g. streaming tool output) without replacing
+        // the component object, and the keyed cache would otherwise
+        // return stale line counts.
+        this.rangeMapper.clear();
         const width = this.getSidebarLayout().mainWidth;
         const rootChildren = this.getRootChildren();
         this.updateRootComponentLineRanges(
