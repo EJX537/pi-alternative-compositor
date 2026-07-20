@@ -297,6 +297,7 @@ export class RenderEngine {
         const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
         const previousVisibleRootStart = this.visibleRootStart;
         const previousVisibleScrollableRows = this.visibleScrollableRows;
+        const previousScrollOffset = this.scrollOffset;
 
         const rootChildren = this.getRootChildren();
         const anchor = this.captureRootViewportAnchor(rootChildren);
@@ -379,6 +380,9 @@ export class RenderEngine {
         // Collapse/expand anchoring: keep the toggled cell stable on screen.
         // This overrides the general anchor because the user's action was on
         // this specific cell.
+        // When the user was at the bottom of the content (scrollOffset === 0)
+        // and the toggled line is inside the viewport, skip the pinning so
+        // the bottom content stays visible rather than scrolling up.
         if (collapseAnchorRange && toggleTarget) {
             const componentStart = collapseAnchorRange.startLine;
             const viewportTop = previousVisibleRootStart;
@@ -405,13 +409,20 @@ export class RenderEngine {
                         Math.min(desiredOffset, lines.length - scrollableRows),
                     );
                 }
-            } else if (toggleStartLine >= 0 && toggleStartLine < viewportBottom) {
+            } else if (
+                toggleStartLine >= 0 &&
+                toggleStartLine < viewportBottom &&
+                previousScrollOffset > 0
+            ) {
                 // Toggled cell was inside the viewport: pin the toggled line
                 // (for local toggles, the exact click line) to the same screen
                 // row it occupied before the toggle. For tools this is the
                 // header; for assistant/thinking toggles it is the clicked
                 // line inside the large message, which avoids jumping to the
                 // assistant's top line.
+                //
+                // When the user was at the bottom (scrollOffset === 0), skip
+                // this anchoring so the viewport stays at the bottom.
                 const oldScreenRow = toggleStartLine - viewportTop;
                 // For local toggles we know the exact click line; for global
                 // toggles we fall back to the component's start line.
@@ -495,13 +506,13 @@ export class RenderEngine {
         const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
         const start = this.updateVisibleRootWindow(scrollableRows);
 
-        // Diagnostic: some terminals (notably Ghostty) exhibit scroll lag when
-        // DEC 2026 synchronized output is combined with DECSTBM scroll regions.
-        // Setting PI_COMPOSITOR_NO_SYNC_SCROLL=1 disables synchronized output
-        // for scroll repaints only, so we can A/B test that interaction.
-        const noSyncScroll = process.env.PI_COMPOSITOR_NO_SYNC_SCROLL === "1";
-        const syncBegin = noSyncScroll ? "" : beginSynchronizedOutput();
-        const syncEnd = noSyncScroll ? "" : endSynchronizedOutput();
+        // DEC 2026 synchronized output can cause scroll lag on some terminals
+        // (notably Ghostty) when combined with DECSTBM scroll regions.  Disable
+        // it by default for scroll repaints.  Set PI_COMPOSITOR_SYNC_SCROLL=1
+        // to re-enable synchronized output during scrolls (may reduce tearing).
+        const useSyncScroll = process.env.PI_COMPOSITOR_SYNC_SCROLL === "1";
+        const syncBegin = useSyncScroll ? beginSynchronizedOutput() : "";
+        const syncEnd = useSyncScroll ? endSynchronizedOutput() : "";
 
         // The fixed cluster (input bar) and sidebar do not move during a scroll,
         // so skip painting them entirely.  Only the scrollable root content needs
