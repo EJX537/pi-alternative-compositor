@@ -67,6 +67,17 @@ export class CompositorLifecycle {
                 const editorSliceIndex = editorMatch.index - clusterStartIndex;
                 const editorContainer: Component | null =
                     clusterChildren[editorSliceIndex] ?? null;
+
+                // Hide every cluster child from Pi&#39;s Container.render() so that
+                // renderOverlayFrame() does not render them twice: once via
+                // originalRender() (which iterates all tui.children) and once
+                // via the explicit getCluster() path below.  Without this, the
+                // cluster (input bar) appears duplicated on screen whenever a
+                // Pi native overlay is active.
+                for (const child of clusterChildren) {
+                    nextCompositor.hideRenderable(child);
+                }
+
                 const aboveChildren = clusterChildren.slice(0, editorSliceIndex);
                 const belowChildren = clusterChildren.slice(
                     editorSliceIndex + 1,

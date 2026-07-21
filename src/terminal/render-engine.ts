@@ -900,7 +900,7 @@ export class RenderEngine {
     // ── Overlay check ───────────────────────────────────────
 
     hasVisibleOverlay(): boolean {
-        if (this.checkingOverlay) return false;
+        if (this.checkingOverlay) return true;
 
         this.checkingOverlay = true;
         try {
@@ -915,6 +915,12 @@ export class RenderEngine {
             return this.tui.overlayStack.some(
                 (entry) => entry && entry.hidden !== true,
             );
+        } catch {
+            // If overlay state is inaccessible (e.g. corrupted overlay stack,
+            // or a visible callback throws), conservatively assume an overlay
+            // is active so the compositor defers to Pi's normal input handling
+            // instead of attempting to process/misdirect the input itself.
+            return true;
         } finally {
             this.checkingOverlay = false;
         }
@@ -933,9 +939,10 @@ export class RenderEngine {
             return;
         }
 
-        // When transitioning from overlay\xe2\x86\x92non-overlay the cluster and sidebar
-        // are already painted on screen \xe2\x80\x94 repainting them here is unnecessary and
-        // causes a visible clear+redraw flicker in the input bar area.
+        // When transitioning from overlay\xe2\x86\x92non-overlay Pi usually does a
+        // full-screen clear (\x1b[2J) which erases the cluster and sidebar from
+        // the screen.  Repaint them here so there is no blank frame between
+        // the overlay dismissal and the next paintFullFrame.
         if (this.overlayTransitionRepaintPending) {
             this.overlayTransitionRepaintPending = false;
             const buffer =
@@ -943,6 +950,13 @@ export class RenderEngine {
                 disableAutoWrap() +
                 moveCursor(1, 1) +
                 data +
+                buildFixedClusterPaint(
+                    this.decorateCluster(cluster),
+                    rawRows,
+                    width,
+                    this.getShowHardwareCursor(),
+                ) +
+                this.buildSidebarPaint() +
                 enableAutoWrap() +
                 this.getMouseReportingGuard() +
                 endSynchronizedOutput();
