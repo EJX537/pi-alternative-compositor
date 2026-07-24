@@ -214,9 +214,11 @@ export class RenderEngine {
 
     setRenderPassActive(active: boolean): void {
         this.renderPassActive = active;
-        if (!active) {
-            this.renderPassCluster = null;
-        }
+        // Don't null renderPassCluster here — let it persist across render
+        // passes so getCluster() returns cached data during scroll calls
+        // without re-rendering the editor on every tick. The cache is
+        // invalidated explicitly in write() and paintFullFrame() when
+        // cluster content might have changed.
     }
 
     get isRenderingCluster(): boolean {
@@ -582,6 +584,11 @@ export class RenderEngine {
     paintFullFrame(): void {
         if (this.hasVisibleOverlay()) return;
 
+        // Ensure the cluster is rendered fresh for full repaints so cursor
+        // position, editor content, and other cluster state that may have
+        // changed without a write() (e.g. cursor movement) are picked up.
+        this.renderPassCluster = null;
+
         const rawRows = this.getRawRows();
         const width = this.getSidebarLayout().mainWidth;
         const highlightedRootLines = this.renderScrollableRoot(width);
@@ -810,8 +817,11 @@ export class RenderEngine {
         width: number,
         terminalRows: number,
     ): FixedEditorClusterRender {
+        // Always check the persistent cache first, regardless of render pass
+        // state.  This lets scroll calls reuse the cluster render across
+        // multiple scroll ticks.  The cache is invalidated in write() and
+        // paintFullFrame() when fresh content is needed.
         if (
-            this.renderPassActive &&
             this.renderPassCluster?.width === width &&
             this.renderPassCluster.terminalRows === terminalRows
         ) {
@@ -822,9 +832,7 @@ export class RenderEngine {
             this.renderCluster(width, terminalRows),
         );
         this.visibleClusterLines = cluster.lines;
-        if (this.renderPassActive) {
-            this.renderPassCluster = { width, terminalRows, cluster };
-        }
+        this.renderPassCluster = { width, terminalRows, cluster };
         return cluster;
     }
 
@@ -929,6 +937,10 @@ export class RenderEngine {
     // ── Terminal write interception ──────────────────────────
 
     write(data: string): void {
+        // Null the cluster cache so getCluster re-renders with fresh editor
+        // content (e.g. after a keystroke or input submission).
+        this.renderPassCluster = null;
+
         const rawRows = this.getRawRows();
         const width = this.getSidebarLayout().mainWidth;
         const cluster = this.getCluster(width, rawRows);
