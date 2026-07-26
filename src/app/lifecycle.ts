@@ -97,6 +97,7 @@ export class CompositorLifecycle {
                         renderHidden(nextCompositor, child, width),
                     ),
                     topPaddingLines: 1,
+                    bottomPaddingLines: 1,
                 });
             },
         });

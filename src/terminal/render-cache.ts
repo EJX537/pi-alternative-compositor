@@ -129,15 +129,17 @@ export class ChildRenderCache {
     /**
      * Render (or reuse) children, recording line counts into `rangeMapper`.
      *
-     * @returns The composed lines and whether any child was actually re-rendered.
+     * @returns The composed lines, whether any child was re-rendered, and a
+     *          set of components whose content actually changed (cache-miss).
      */
     render(
         children: readonly unknown[],
         width: number,
         collapseState: CollapseController,
         rangeMapper: ComponentRangeMapper,
-    ): { lines: string[]; changed: boolean } {
+    ): { lines: string[]; changed: boolean; changedComponents: Set<object> } {
         let changed = false;
+        const changedComponents = new Set<object>();
         const allLines: string[] = [];
         const seen = new Set<object>();
 
@@ -163,6 +165,7 @@ export class ChildRenderCache {
                     signature,
                 });
                 changed = true;
+                changedComponents.add(component);
             }
             for (let i = 0; i < lines.length; i++) {
                 allLines.push(lines[i]);
@@ -177,7 +180,7 @@ export class ChildRenderCache {
             }
         }
 
-        return { lines: allLines, changed };
+        return { lines: allLines, changed, changedComponents };
     }
 
     /** Drop all cached entries (e.g. on width change). */

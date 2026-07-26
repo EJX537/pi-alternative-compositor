@@ -95,6 +95,8 @@ export class RenderEngine {
     private visibleScrollableRows = 0;
     private visibleRootLines: string[] = [];
     private visibleClusterLines: string[] = [];
+    /** Components that changed in the most recent refreshRootWindow call. */
+    private lastChangedComponents: Set<object> = new Set();
 
     /**
      * Set by the controller when transitioning from overlay\xe2\x86\x92non-overlay.
@@ -221,6 +223,38 @@ export class RenderEngine {
         // cluster content might have changed.
     }
 
+    /**
+     * Return the set of components that changed in the most recent
+     * refreshRootWindow call, then clear the set.  Used by the render
+     * loop to decide between incremental vs full repaint.
+     */
+    getAndClearChangedComponents(): Set<object> {
+        const s = this.lastChangedComponents;
+        this.lastChangedComponents = new Set();
+        return s;
+    }
+
+    /**
+     * Estimate how many screen rows are affected by a set of changed
+     * components, based on the current root component line ranges.
+     */
+    estimateAffectedLines(changed: Set<object>): number {
+        if (changed.size === 0) return 0;
+        const rows = new Set<number>();
+        const start = this.visibleRootStart;
+        const end = start + this.visibleScrollableRows;
+        for (const comp of changed) {
+            const range = this.rootComponentLineRanges.find(
+                r => r.component === comp,
+            );
+            if (!range) continue;
+            const rStart = Math.max(start, range.startLine);
+            const rEnd = Math.min(end, range.startLine + range.lineCount);
+            for (let r = rStart; r < rEnd; r++) rows.add(r);
+        }
+        return rows.size;
+    }
+
     get isRenderingCluster(): boolean {
         return this.renderingCluster;
     }
@@ -312,12 +346,13 @@ export class RenderEngine {
             this.rangeMapper.clear();
         }
 
-        const { lines } = this.childRenderCache.render(
+        const { lines, changedComponents } = this.childRenderCache.render(
             rootChildren,
             renderWidth,
             this.collapseState,
             this.rangeMapper,
         );
+        this.lastChangedComponents = changedComponents;
         this.rootLines = lines;
         this.updateRootComponentLineRanges(
             renderWidth,
@@ -584,6 +619,165 @@ export class RenderEngine {
         );
         this.tui.previousKittyImageIds =
             this.tui.collectKittyImageIds(highlightedRootLines);
+    }
+
+    /**
+     * Incremental repaint that patches only screen rows affected by a set of
+     * changed components.  Skips cluster, sidebar, DEC sync, and scroll region
+     * setup — assumes those are unchanged from the last full paint.
+     *
+     * Used for small animated updates (spinners, progress indicators) where the
+     * overhead of a full paintFullFrame would cause visible jank.
+     */
+    incrementalRepaint(changed: Set<object>): void {
+        if (changed.size === 0) return;
+        const width = this.getSidebarLayout().mainWidth;
+        const rows = this.visibleScrollableRows;
+        const start = this.visibleRootStart;
+
+        // Build set of screen rows that need updating
+        const affectedRows = new Set<number>();
+        for (const comp of changed) {
+            const range = this.rootComponentLineRanges.find(
+                r => r.component === comp,
+            );
+            if (!range) continue;
+            const rStart = Math.max(0, range.startLine - start);
+            const rEnd = Math.min(rows, rStart + range.lineCount);
+            for (let r = rStart; r < rEnd; r++) affectedRows.add(r);
+        }
+        if (affectedRows.size === 0) return;
+
+        const hasSelection = this.selectionManager.area !== null;
+        let buf = disableAutoWrap();
+        for (const row of [...affectedRows].sort((a, b) => a - b)) {
+            const line = this.visibleRootLines[row] ?? "";
+            const highlighted = hasSelection
+                ? this.selectionManager.renderSelectionHighlight(
+                      line,
+                      start + row,
+                      "root",
+                  )
+                : line;
+            const content = sanitizeLine(highlighted, width);
+            const vis = visibleWidth(content);
+            buf += moveCursor(row + 1, 1);
+            buf += vis >= width
+                ? content + "\x1b[0m"
+                : content + "\x1b[0m" + " ".repeat(width - vis);
+        }
+        buf += this.getMouseReportingGuard();
+        buf += enableAutoWrap();
+        this.originalWrite(buf);
+    }
+
+    /**
+     * Single entry point for the compositor's render loop.  Called by the
+     * patched doRender for every non-overlay frame.
+     *
+     * 1. Calls refreshRootWindow ONCE to update root state from children.
+     * 2. If only a few lines changed → incrementalRepaint (no cluster/sidebar).
+     * 3. Otherwise → full paint from the already-fresh rootLines (no double
+     *    refreshRootWindow).
+     */
+    renderFrame(): void {
+        if (this.hasVisibleOverlay()) return;
+        const rawRows = this.getRawRows();
+        const width = this.getSidebarLayout().mainWidth;
+
+        // One call — renders children, updates rootLines, populates cache.
+        this.refreshRootWindow(width);
+
+        const changed = this.getAndClearChangedComponents();
+        if (changed.size > 0 && this.estimateAffectedLines(changed) <= 10) {
+            this.incrementalRepaint(changed);
+            return;
+        }
+
+        // Full paint from the rootLines that refreshRootWindow just produced.
+        this.renderPassCluster = null;
+        const cluster = this.getCluster(width, rawRows);
+        const scrollableRows = Math.max(1, rawRows - cluster.lines.length);
+        const highlightedRootLines = this.visibleRootLines.map((line, index) =>
+            this.selectionManager.renderSelectionHighlight(
+                line,
+                this.visibleRootStart + index,
+                "root",
+            ),
+        );
+
+        let buffer =
+            beginSynchronizedOutput() +
+            disableAutoWrap() +
+            setScrollRegion(1, scrollableRows);
+
+        for (let row = 0; row < scrollableRows; row++) {
+            if (row > 0) buffer += "\r\n";
+            buffer += moveCursor(row + 1, 1);
+            const content = sanitizeLine(
+                highlightedRootLines[row] ?? "",
+                width,
+            );
+            const vis = visibleWidth(content);
+            buffer += vis >= width
+                ? content + "\x1b[0m"
+                : content + "\x1b[0m" + " ".repeat(width - vis);
+        }
+
+        buffer += buildFixedClusterPaint(
+            this.decorateCluster(cluster),
+            rawRows,
+            width,
+            this.getShowHardwareCursor(),
+        );
+        buffer += this.buildSidebarPaint();
+        buffer += enableAutoWrap();
+        buffer += this.getMouseReportingGuard();
+        buffer += endSynchronizedOutput();
+        this.originalWrite(buffer);
+
+        // Keep Pi's cursor/viewport bookkeeping consistent.
+        const contentRows = Math.max(0, highlightedRootLines.length - 1);
+        this.tui.hardwareCursorRow = contentRows;
+        this.tui.cursorRow = contentRows;
+        this.tui.previousViewportTop = 0;
+        this.tui.previousLines = highlightedRootLines;
+        this.tui.previousWidth = width;
+        this.tui.previousHeight = rawRows;
+        this.tui.maxLinesRendered = Math.max(
+            this.tui.maxLinesRendered ?? 0,
+            highlightedRootLines.length,
+        );
+        this.tui.previousKittyImageIds =
+            this.tui.collectKittyImageIds(highlightedRootLines);
+    }
+
+    /**
+     * Paint a simple intermediate frame (e.g. "Loading...") immediately after
+     * entering the alternate screen, before the first real paintFullFrame.
+     * Gives the user immediate visual feedback instead of a blank screen
+     * during the synchronous render cache warm-up.
+     */
+    paintIntermediateFrame(message: string): void {
+        const rows = this.getRawRows();
+        const layout = this.getSidebarLayout();
+        const scrollRows = Math.max(1, rows - 3);
+
+        let buf = beginSynchronizedOutput() + disableAutoWrap();
+        for (let r = 1; r <= scrollRows; r++) {
+            buf += moveCursor(r, 1) + clearToEndOfLine();
+            if (r === Math.floor(scrollRows / 2) && message.length <= layout.mainWidth) {
+                const pad = Math.max(0, Math.floor((layout.mainWidth - message.length) / 2));
+                buf += " ".repeat(pad) + message + "\x1b[0m";
+            }
+        }
+        // Minimal cluster placeholder
+        buf += buildFixedClusterPaint(
+            { lines: [""], cursor: null },
+            rows, layout.mainWidth, false,
+        );
+        buf += this.buildSidebarPaint() + enableAutoWrap() + this.getMouseReportingGuard() + endSynchronizedOutput();
+        this.originalWrite(buf);
     }
 
     private renderOverlayFrame(): string[] {
@@ -880,26 +1074,14 @@ export class RenderEngine {
     // ── Terminal write interception ──────────────────────────
 
     write(data: string): void {
-        // Null the cluster cache so getCluster re-renders with fresh editor
-        // content (e.g. after a keystroke or input submission).
-        this.renderPassCluster = null;
-
         const rawRows = this.getRawRows();
         const width = this.getSidebarLayout().mainWidth;
-        const cluster = this.getCluster(width, rawRows);
-        const reservedRows = cluster.lines.length;
 
-        if (reservedRows === 0 || rawRows <= 2) {
-            this.originalWrite(data);
-            return;
-        }
-
-        // When transitioning from overlay\xe2\x86\x92non-overlay Pi usually does a
-        // full-screen clear (\x1b[2J) which erases the cluster and sidebar from
-        // the screen.  Repaint them here so there is no blank frame between
-        // the overlay dismissal and the next paintFullFrame.
+        // Overlay transition: Pi has issued \x1b[2J which erased everything,
+        // so we must repaint cluster + sidebar along with the data.
         if (this.overlayTransitionRepaintPending) {
             this.overlayTransitionRepaintPending = false;
+            const cluster = this.getCluster(width, rawRows);
             const buffer =
                 beginSynchronizedOutput() +
                 disableAutoWrap() +
@@ -919,30 +1101,11 @@ export class RenderEngine {
             return;
         }
 
-        const scrollBottom = Math.max(1, rawRows - reservedRows);
-        const hardwareCursorRow = this.tui.hardwareCursorRow;
-        const viewportTop = this.tui.previousViewportTop;
-        const screenRow = Math.max(
-            1,
-            Math.min(scrollBottom, hardwareCursorRow - viewportTop + 1),
-        );
-        const buffer =
-            beginSynchronizedOutput() +
-            disableAutoWrap() +
-            setScrollRegion(1, scrollBottom) +
-            moveCursor(screenRow, 1) +
-            data +
-            buildFixedClusterPaint(
-                this.decorateCluster(cluster),
-                rawRows,
-                width,
-                this.getShowHardwareCursor(),
-            ) +
-            this.buildSidebarPaint() +
-            enableAutoWrap() +
-            this.getMouseReportingGuard() +
-            endSynchronizedOutput();
-
-        this.originalWrite(buffer);
+        // Normal write: pass data through directly.  The editor's own cursor
+        // positioning and character echo provide immediate visual feedback.
+        // Cluster + sidebar decoration is handled by the next renderFrame().
+        // This avoids wrapping every keystroke in ~500 bytes of cluster
+        // repaint, making typing feel significantly more responsive.
+        this.originalWrite(data);
     }
 }

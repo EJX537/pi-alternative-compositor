@@ -77,6 +77,7 @@ export class TerminalSplitCompositor {
     // subsequent mouse events can use the lightweight re-map path without
     // clearing caches on every click.
     private rootStateRefreshedAfterInstall = false;
+    private resizeHandler: (() => void) | null = null;
 
     // Sub-managers
     readonly collapseState = new CollapseController();
@@ -155,6 +156,7 @@ export class TerminalSplitCompositor {
         if (this.installed) return;
 
         this.originalWrite(this.modeManager.buildInstallSequence());
+        this.renderEngine.paintIntermediateFrame("Loading compositor...");
         this.emergencyCleanup = () => {
             if (!this.disposed) {
                 this.restoreTerminalStateForExit();
@@ -197,6 +199,15 @@ export class TerminalSplitCompositor {
         addOurInputListener();
 
         this.terminal.write = (data: string) => this.write(data);
+
+        // Window resize: force a repaint when the terminal dimensions change.
+        if (typeof process !== "undefined" && typeof process.on === "function") {
+            this.resizeHandler = () => {
+                if (!this.disposed) this.tui.requestRender();
+            };
+            process.on("SIGWINCH", this.resizeHandler);
+        }
+
         if (this.originalDoRender) {
             // Track overlay state across doRender calls so we can detect
             // overlay-non-overlay transitions and avoid unnecessary
@@ -231,9 +242,10 @@ export class TerminalSplitCompositor {
                         this.originalDoRender?.();
                     } else {
                         lastDoRenderHadOverlay = false;
-                        // Normal renders are owned entirely by the compositor:
-                        // one terminal write that refreshes root + cluster.
-                        this.requestRepaint();
+                        // Normal renders are owned entirely by the compositor.
+                        // renderFrame() handles the incremental-vs-full decision
+                        // with a single refreshRootWindow call.
+                        this.renderEngine.renderFrame();
                     }
                 } finally {
                     this.renderPassActive = false;
@@ -380,6 +392,11 @@ export class TerminalSplitCompositor {
             this.emergencyCleanup = null;
         }
         this.modeManager.clearTimers();
+
+        if (this.resizeHandler && typeof process !== "undefined" && typeof process.off === "function") {
+            process.off("SIGWINCH", this.resizeHandler);
+            this.resizeHandler = null;
+        }
 
         this.terminal.write = this.originalWrite;
         if (this.originalDoRender) {

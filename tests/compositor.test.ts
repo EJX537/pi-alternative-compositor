@@ -94,7 +94,10 @@ describe("TerminalSplitCompositor installation", () => {
         // Dispose for reload: emit nothing; leave modes for the next instance.
         compositor1.dispose({ reason: "reload" });
         const nonEmptyWrites1 = writes1.filter((w) => w.length > 0);
-        expect(nonEmptyWrites1).toHaveLength(1);
+        // Two writes: install escape sequence + loading intermediate frame.
+        expect(nonEmptyWrites1).toHaveLength(2);
+        expect(nonEmptyWrites1[0]).toContain("\x1b[?1049h");
+        expect(nonEmptyWrites1[1]).toContain("Loading");
 
         // New install after reload: do not re-enter or erase again.
         const { options: options2, writes: writes2 } = createOptions();
@@ -734,7 +737,8 @@ describe("TerminalSplitCompositor installation", () => {
         expect(options.terminal.columns).toBe(80);
         visible = true;
 
-        options.terminal.write("root");
+        // Sidebar is painted on renderFrame(), not on every write().
+        (options.tui as unknown as { doRender: () => void }).doRender();
         expect(writes.at(-1)).toContain("\x1b[1;55H\x1b[Ksidebar");
 
         compositor.dispose();
@@ -824,7 +828,8 @@ describe("TerminalSplitCompositor installation", () => {
         compositor.install();
         tui.doRender();
 
-        expect(writes).toHaveLength(2); // install sequence + one frame write
+        // install (escape sequence + loading frame) + one paintFullFrame
+        expect(writes).toHaveLength(3);
         // visibleRootLines is padded to the scrollable height (23 rows here),
         // so Pi's cursor/viewport bookkeeping reflects the padded viewport.
         expect(tui.hardwareCursorRow).toBe(22);
