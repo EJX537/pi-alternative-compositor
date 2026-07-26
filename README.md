@@ -12,6 +12,17 @@ A scrollable chat viewport compositor for [pi coding agent](https://pi.dev) that
 - **📌 Fixed editor** — The input editor stays at the bottom while the chat scrolls independently.
 - **📋 Right sidebar** — Reserved space for sidebar (Showcase).
 
+## Architecture
+
+Collapse toggling is handled at the **component level** (not the TUI level):
+
+1. `CollapseController` patches each collapsible component's `setExpanded()` / `setHideThinkingBlock()` methods.
+2. When pi calls these (global keyboard shortcut, reconciliation after streaming), the patch checks for a per-cell override. If one exists, pi's call is ignored — our per-cell choice wins.
+3. Pi's own rendering pipeline handles the actual collapse rendering. No render wrapping, no header-line heuristics.
+4. Overrides are keyed by stable identity (`toolCallId` / `message.id`), surviving component rebuilds across streaming.
+
+The scrollable viewport, fixed editor, sidebar, and selection remain at the TUI level.
+
 ## Installation
 
 ```bash
@@ -36,6 +47,7 @@ The compositor activates automatically on the next session start.
 ## Settings
 
 Open **`/compositor`** to toggle the sidebar. Setting persists in pi's global `settings.json` under `compositor.enableSidebar`.
+
 ## Development
 
 ```bash

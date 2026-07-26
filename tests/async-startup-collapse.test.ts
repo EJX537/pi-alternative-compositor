@@ -72,12 +72,11 @@ describe("Async-startup collapse", () => {
     it("(a) click-to-collapse FAILS when no explicit render() has populated state", () => {
         const { options } = createOptions();
 
-        const expanded: boolean[] = [];
         const tool = {
             toolCallId: "tool-async",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
 
@@ -123,7 +122,7 @@ describe("Async-startup collapse", () => {
         internal.handleMousePacket(leftPress(1, 1));
         internal.handleMousePacket(leftRelease(1, 1));
 
-        expect(expanded).toEqual([false]);
+        expect(internal.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -170,12 +169,11 @@ describe("Async-startup collapse", () => {
     it("(c) collapsible children added after install are clickable after render", () => {
         const { options } = createOptions();
 
-        const expanded: boolean[] = [];
         const tool = {
             toolCallId: "tool-late",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
 
@@ -218,7 +216,7 @@ describe("Async-startup collapse", () => {
         internal.handleMousePacket(leftPress(1, 1));
         internal.handleMousePacket(leftRelease(1, 1));
 
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -226,12 +224,11 @@ describe("Async-startup collapse", () => {
     it("(d) collapsible children added after install are clickable after doRender", () => {
         const { options } = createOptions();
 
-        const expanded: boolean[] = [];
         const tool = {
             toolCallId: "tool-late-dorender",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
 
@@ -275,7 +272,7 @@ describe("Async-startup collapse", () => {
         internal.handleMousePacket(leftPress(1, 1));
         internal.handleMousePacket(leftRelease(1, 1));
 
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -283,12 +280,11 @@ describe("Async-startup collapse", () => {
     it("(f) collapsible nested children added after install are clickable after doRender", () => {
         const { options } = createOptions();
 
-        const expanded: boolean[] = [];
         const tool = {
             toolCallId: "tool-nested",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
         const chat = {
@@ -332,7 +328,7 @@ describe("Async-startup collapse", () => {
             toolCallId: "tool-nested-2",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output 2"],
         };
         chat.children = [tool, tool2];
@@ -346,7 +342,7 @@ describe("Async-startup collapse", () => {
         internal.handleMousePacket(leftPress(2, 1));
         internal.handleMousePacket(leftRelease(2, 1));
 
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool2)).toBe(true);
 
         compositor.dispose();
     });
@@ -354,12 +350,11 @@ describe("Async-startup collapse", () => {
     it("(e) mouse input lazily refreshes stale ranges before toggling", () => {
         const { options } = createOptions();
 
-        const expanded: boolean[] = [];
         const tool = {
             toolCallId: "tool-lazy",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
 
@@ -392,7 +387,7 @@ describe("Async-startup collapse", () => {
         // root window state before dispatching to the mouse handler.
         const consumed = internal.handleInput("\x1b[<0;1;1M\x1b[<0;1;1m");
         expect(consumed?.consume).toBe(true);
-        expect(expanded).toEqual([false]);
+        expect(internal.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });

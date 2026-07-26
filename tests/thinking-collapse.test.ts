@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import {
-    ComponentCollapseState,
-    isAssistantComponent,
-} from "../src/terminal/collapse";
+import { CollapseController } from "../src/collapse/collapse-controller.js";
+import { isAssistantComponent, isToolComponent } from "../src/collapse/types.js";
 import { TerminalSplitCompositor } from "../src/terminal/controller";
 import type { TerminalSplitCompositorOptions } from "../src/terminal/types";
+
+// ── Helpers ───────────────────────────────────────────────────
 
 function createAssistantComponent(overrides: {
     role?: string;
@@ -15,11 +15,9 @@ function createAssistantComponent(overrides: {
     component: {
         lastMessage: { role: string; responseId?: string };
         hideThinkingBlock: boolean;
-        setHideThinkingBlockCalls: boolean[];
         setHideThinkingBlock: (hide: boolean) => void;
         children?: unknown[];
     };
-    setHideThinkingBlock: (hide: boolean) => void;
 } {
     const state = {
         lastMessage: {
@@ -29,14 +27,25 @@ function createAssistantComponent(overrides: {
             }),
         },
         hideThinkingBlock: overrides.hideThinkingBlock ?? false,
-        setHideThinkingBlockCalls: [] as boolean[],
         setHideThinkingBlock(hide: boolean) {
             this.hideThinkingBlock = hide;
-            this.setHideThinkingBlockCalls.push(hide);
         },
     };
-    return { component: state, setHideThinkingBlock: state.setHideThinkingBlock };
+    return { component: state };
 }
+
+function createToolComponent(expanded = true) {
+    return {
+        toolCallId: "t1",
+        toolName: "read",
+        expanded,
+        setExpanded(value: boolean) {
+            this.expanded = value;
+        },
+    };
+}
+
+// ── Type guard tests ──────────────────────────────────────────
 
 describe("isAssistantComponent", () => {
     it("recognizes an assistant component without a message id field", () => {
@@ -50,96 +59,81 @@ describe("isAssistantComponent", () => {
     });
 
     it("rejects a component missing setHideThinkingBlock", () => {
-        const component = {
-            lastMessage: { role: "assistant" },
-        };
+        const component = { lastMessage: { role: "assistant" } };
         expect(isAssistantComponent(component)).toBe(false);
     });
 
-    it("recognizes an assistant component with responseId but no id", () => {
+    it("recognizes an assistant component with responseId", () => {
         const { component } = createAssistantComponent({ responseId: "resp-1" });
         expect(isAssistantComponent(component)).toBe(true);
     });
 });
 
-describe("ComponentCollapseState thinking toggles", () => {
+// ── CollapseController unit tests ─────────────────────────────
+
+describe("CollapseController", () => {
     it("toggles an assistant component to collapsed", () => {
-        const collapse = new ComponentCollapseState();
+        const collapse = new CollapseController();
         const { component } = createAssistantComponent();
-
-        const toggled = collapse.toggle([
-            { component, startLine: 0, lineCount: 5 },
-        ]);
-
-        expect(toggled).toBe(true);
-        expect(component.hideThinkingBlock).toBe(true);
-        expect(component.setHideThinkingBlockCalls).toEqual([true]);
+        collapse.toggle(component, 0);
+        expect(collapse.isCollapsed(component)).toBe(true);
     });
 
     it("toggles an assistant component back to expanded", () => {
-        const collapse = new ComponentCollapseState();
-        const { component } = createAssistantComponent({
-            hideThinkingBlock: true,
-        });
-
-        collapse.toggle([{ component, startLine: 0, lineCount: 5 }]);
-        expect(component.hideThinkingBlock).toBe(false);
+        const collapse = new CollapseController();
+        const { component } = createAssistantComponent({ hideThinkingBlock: true });
+        collapse.toggle(component, 0);
+        expect(collapse.isCollapsed(component)).toBe(false);
     });
 
-    it("prefers the local override over the instance default", () => {
-        const collapse = new ComponentCollapseState();
+    it("prefers the local override over pi's instance state", () => {
+        const collapse = new CollapseController();
         const { component } = createAssistantComponent();
-
-        collapse.toggle([{ component, startLine: 0, lineCount: 5 }]);
+        collapse.toggle(component, 0);
         expect(collapse.isCollapsed(component)).toBe(true);
 
-        // Simulate Pi rebuilding the component with the opposite default.
-        const rebuilt = {
-            ...component,
-            hideThinkingBlock: false,
-            setHideThinkingBlockCalls: [] as boolean[],
-            setHideThinkingBlock(hide: boolean) {
-                this.hideThinkingBlock = hide;
-                this.setHideThinkingBlockCalls.push(hide);
-            },
-        };
-
-        collapse.reconcile([rebuilt]);
-        expect(rebuilt.hideThinkingBlock).toBe(true);
+        // Simulate pi rebuilding the component with a different default.
+        const rebuilt = { ...component, hideThinkingBlock: false };
+        // Override in WeakMap persists regardless of pi's instance property.
+        expect(collapse.isCollapsed(rebuilt)).toBe(true);
     });
 
-    it("returns false for a non-collapsible path", () => {
-        const collapse = new ComponentCollapseState();
+    it("returns false for a non-collapsible component", () => {
+        const collapse = new CollapseController();
         const component = { render: () => [] };
-        expect(collapse.toggle([{ component, startLine: 0, lineCount: 1 }])).toBe(
-            false,
-        );
+        expect(collapse.toggle(component, 0)).toBe(false);
     });
 
-    it("prefers the innermost tool over an enclosing assistant", () => {
-        const collapse = new ComponentCollapseState();
-        const assistant = createAssistantComponent().component;
-        const tool = {
-            toolCallId: "t1",
-            toolName: "read",
-            expanded: true,
-            setExpandedCalls: [] as boolean[],
-            setExpanded(value: boolean) {
-                this.expanded = value;
-                this.setExpandedCalls.push(value);
-            },
-        };
+    it("toggles a tool component", () => {
+        const collapse = new CollapseController();
+        const tool = createToolComponent(true);
+        collapse.toggle(tool, 0);
+        expect(collapse.isCollapsed(tool)).toBe(true);
+    });
 
-        const toggled = collapse.toggle([
-            { component: assistant, startLine: 0, lineCount: 10 },
-            { component: tool, startLine: 2, lineCount: 5 },
-        ]);
+    it("consumes and clears lastToggle", () => {
+        const collapse = new CollapseController();
+        const tool = createToolComponent(true);
+        collapse.toggle(tool, 42);
+        const t = collapse.consumeLastToggle();
+        expect(t).not.toBeNull();
+        expect(t!.component).toBe(tool);
+        expect(t!.collapsed).toBe(true);
+        expect(t!.startLine).toBe(42);
+        expect(collapse.consumeLastToggle()).toBeNull();
+    });
 
-        expect(toggled).toBe(true);
-        expect(tool.expanded).toBe(false);
-        expect(assistant.hideThinkingBlock).toBe(false);
+    it("reports pending toggle correctly", () => {
+        const collapse = new CollapseController();
+        expect(collapse.hasPendingToggle).toBe(false);
+        collapse.toggle(createToolComponent(true), 0);
+        expect(collapse.hasPendingToggle).toBe(true);
+        collapse.consumeLastToggle();
+        expect(collapse.hasPendingToggle).toBe(false);
     });
 });
+
+// ── Integration: TerminalSplitCompositor + collapse ───────────
 
 function createOptions(): {
     options: TerminalSplitCompositorOptions;
@@ -185,19 +179,13 @@ function createOptions(): {
     };
 }
 
-describe("TerminalSplitCompositor thinking collapse integration", () => {
+describe("TerminalSplitCompositor collapse integration", () => {
     it("identifies an assistant message component in the line range map", () => {
         const { options } = createOptions();
         const assistant = createAssistantComponent().component;
-        assistant.children = [
-            {
-                render: () => ["Thinking..."],
-            },
-        ];
-        assistant.render = function (width: number) {
-            return this.children!.flatMap((c: { render: (w: number) => string[] }) =>
-                c.render(width),
-            );
+        assistant.children = [{ render: () => ["Thinking..."] }];
+        assistant.render = function (this: { children: { render: (w: number) => string[] }[] }, width: number) {
+            return this.children.flatMap((c) => c.render(width));
         };
 
         const tui = options.tui as unknown as {
@@ -222,15 +210,9 @@ describe("TerminalSplitCompositor thinking collapse integration", () => {
     it("toggles thinking collapse via the collapse state", () => {
         const { options } = createOptions();
         const assistant = createAssistantComponent().component;
-        assistant.children = [
-            {
-                render: () => ["Thinking..."],
-            },
-        ];
-        assistant.render = function (width: number) {
-            return this.children!.flatMap((c: { render: (w: number) => string[] }) =>
-                c.render(width),
-            );
+        assistant.children = [{ render: () => ["Thinking..."] }];
+        assistant.render = function (this: { children: { render: (w: number) => string[] }[] }, width: number) {
+            return this.children.flatMap((c) => c.render(width));
         };
 
         const tui = options.tui as unknown as {
@@ -245,12 +227,14 @@ describe("TerminalSplitCompositor thinking collapse integration", () => {
         tui.render(80);
 
         const path = compositor.getRootComponentPathAtLine(0);
-        const cs = compositor as unknown as {
-            collapseState: { toggle: (path: unknown[]) => boolean };
-        };
-        const toggled = cs.collapseState.toggle(path);
+        // Find assistant component from path
+        const target = [...path].reverse().find((r) => isAssistantComponent(r.component));
+        expect(target).toBeDefined();
+        if (!target) return;
+
+        const toggled = compositor.collapseState.toggle(target.component, 0);
         expect(toggled).toBe(true);
-        expect(assistant.hideThinkingBlock).toBe(true);
+        expect(compositor.collapseState.isCollapsed(target.component)).toBe(true);
 
         compositor.dispose();
     });

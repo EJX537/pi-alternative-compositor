@@ -213,7 +213,7 @@ describe("TerminalSplitCompositor installation", () => {
             toolCallId: "tool-1",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
         const tui = options.tui as unknown as {
@@ -232,13 +232,13 @@ describe("TerminalSplitCompositor installation", () => {
         tui.render(80);
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
         expect(internal.selectionDragging).toBe(false);
 
         tool.expanded = false;
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded).toEqual([false, true]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(false);
 
         // A bare drag still starts and finishes a selection on non-collapsible
         // content without toggling anything.
@@ -256,7 +256,7 @@ describe("TerminalSplitCompositor installation", () => {
             toolCallId: "tool-resize",
             toolName: "read",
             expanded: false,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () =>
                 tool.expanded
                     ? ["expanded line 1", "expanded line 2", "expanded line 3"]
@@ -278,13 +278,13 @@ describe("TerminalSplitCompositor installation", () => {
 
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(true);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(false);
 
         tui.render(80);
 
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(false);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -296,7 +296,7 @@ describe("TerminalSplitCompositor installation", () => {
             toolCallId: "tool-drift",
             toolName: "read",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
         const tui = options.tui as unknown as {
@@ -316,7 +316,7 @@ describe("TerminalSplitCompositor installation", () => {
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 32, col: 2, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 2, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(false);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -364,7 +364,7 @@ describe("TerminalSplitCompositor installation", () => {
         // Collapse the tool via the extension state (simulates a click or
         // keyboard action on the tool even when it is above the viewport).
         const path = compositor.getRootComponentPathAtLine(0);
-        internal.collapseState.toggle(path);
+        ((() => { const p2 = path; const t2 = [...p2].reverse().find(r => internal.collapseState.isCollapsibleComponent(r.component)); if (t2) internal.collapseState.toggle(t2.component, t2.startLine); })());
         tui.render(80);
 
         // The viewport should jump so the now-collapsed tool is at the top.
@@ -382,13 +382,13 @@ describe("TerminalSplitCompositor installation", () => {
             toolCallId: "tool-2",
             toolName: "bash",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         };
         const assistant = {
             lastMessage: { role: "assistant", id: "message-1" },
             hideThinkingBlock: false,
-            setHideThinkingBlock: (value: boolean) => hidden.push(value),
+            setHideThinkingBlock: () => {},
             children: [tool],
             render: () => tool.render(),
         };
@@ -408,14 +408,14 @@ describe("TerminalSplitCompositor installation", () => {
         tui.render(80);
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
         expect(hidden).toEqual([]);
 
-        const rebuiltHidden: boolean[] = [];
+        // rebuiltHidden removed
         const rebuilt = {
             lastMessage: { role: "assistant", id: "message-1" },
             hideThinkingBlock: false,
-            setHideThinkingBlock: (value: boolean) => rebuiltHidden.push(value),
+            setHideThinkingBlock: () => {},
             render: () => ["thinking"],
         };
         // Toggle thinking on the original message, then emulate Pi recreating it.
@@ -426,11 +426,11 @@ describe("TerminalSplitCompositor installation", () => {
         tui.render(80);
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(hidden).toEqual([true]);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(true);
         current = rebuilt;
         tui.children = [rebuilt];
         tui.render(80);
-        expect(rebuiltHidden).toContain(true);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(true);
         compositor.dispose();
     });
 
@@ -489,7 +489,7 @@ describe("TerminalSplitCompositor installation", () => {
             // Pi may rebuild the component without preserving the last expanded
             // value, so the compositor must rely on its local override.
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output"],
         });
         const tui = options.tui as unknown as {
@@ -509,7 +509,7 @@ describe("TerminalSplitCompositor installation", () => {
 
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(false);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         // Simulate Pi recreating the component with its default expanded state.
         tool = makeTool();
@@ -518,7 +518,7 @@ describe("TerminalSplitCompositor installation", () => {
         expanded.length = 0;
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(true);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(false);
 
         tool = makeTool();
         tui.children = [tool];
@@ -526,7 +526,7 @@ describe("TerminalSplitCompositor installation", () => {
         expanded.length = 0;
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(expanded.at(-1)).toBe(false);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -537,7 +537,7 @@ describe("TerminalSplitCompositor installation", () => {
         const makeAssistant = () => ({
             lastMessage: { role: "assistant", id: "msg-multi" },
             hideThinkingBlock: false,
-            setHideThinkingBlock: (value: boolean) => hidden.push(value),
+            setHideThinkingBlock: () => {},
             render: () => ["thinking"],
         });
         const tui = options.tui as unknown as {
@@ -557,7 +557,7 @@ describe("TerminalSplitCompositor installation", () => {
 
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(hidden.at(-1)).toBe(true);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(true);
 
         assistant = makeAssistant();
         tui.children = [assistant];
@@ -565,7 +565,7 @@ describe("TerminalSplitCompositor installation", () => {
         hidden.length = 0;
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(hidden.at(-1)).toBe(false);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(false);
 
         assistant = makeAssistant();
         tui.children = [assistant];
@@ -573,7 +573,7 @@ describe("TerminalSplitCompositor installation", () => {
         hidden.length = 0;
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "M" });
         internal.handleMousePacket({ code: 0, col: 1, row: 1, final: "m" });
-        expect(hidden.at(-1)).toBe(true);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(true);
 
         compositor.dispose();
     });
@@ -1109,10 +1109,10 @@ describe("root render cache", () => {
         // Collapse the nested tool.  The assistant's signature must change because
         // it includes its descendants, so the assistant re-renders.
         const path = compositor.getRootComponentPathAtLine(1);
-        const internal = compositor as unknown as {
-            collapseState: { toggle: (path: unknown[]) => boolean };
-        };
-        expect(internal.collapseState.toggle(path)).toBe(true);
+        const compAtLine = compositor.getRootComponentAtLine(1);
+        expect(compAtLine).not.toBeNull();
+        const toggled = compositor.collapseState.toggle(tool, 1);
+        expect(toggled).toBe(true);
 
         const after = tui.render(80);
         expect(after[0]).toBe("assistant header");

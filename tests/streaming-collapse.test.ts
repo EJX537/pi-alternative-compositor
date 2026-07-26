@@ -69,7 +69,7 @@ describe("Streaming collapse regressions", () => {
             toolCallId: "tool-streaming",
             toolName: "bash",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output line"],
         };
 
@@ -128,7 +128,7 @@ describe("Streaming collapse regressions", () => {
         internal.handleMousePacket({ code: 0, col: 1, row: 4, final: "m" });
         expect(sm.hadDrag).toBe(false);
 
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });
@@ -141,7 +141,7 @@ describe("Streaming collapse regressions", () => {
             toolCallId: "tool-new-message",
             toolName: "bash",
             expanded: true,
-            setExpanded: (value: boolean) => expanded.push(value),
+            setExpanded: () => {},
             render: () => ["tool output line"],
         };
 
@@ -210,7 +210,7 @@ describe("Streaming collapse regressions", () => {
         internal.handleMousePacket(leftPress(3, 1));
         internal.handleMousePacket(leftRelease(3, 1));
 
-        expect(expanded).toEqual([false]);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         compositor.dispose();
     });

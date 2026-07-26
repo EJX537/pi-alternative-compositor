@@ -1,8 +1,8 @@
+import { CollapseController } from "../collapse/collapse-controller.js";
 import {
     isAssistantComponent,
     isToolComponent,
-    type ComponentCollapseState,
-} from "./collapse.js";
+} from "../collapse/types.js";
 import type { ComponentRangeMapper } from "./range-mapper.js";
 
 /**
@@ -49,7 +49,7 @@ function stableObjectId(obj: object): number {
 function signatureForComponent(
     component: unknown,
     width: number,
-    collapseState: ComponentCollapseState,
+    collapseState: CollapseController,
     seen: WeakSet<object>,
 ): string {
     if (!component || typeof component !== "object") {
@@ -104,7 +104,7 @@ function signatureForComponent(
 function signatureForChild(
     component: object,
     width: number,
-    collapseState: ComponentCollapseState,
+    collapseState: CollapseController,
 ): string {
     return signatureForComponent(component, width, collapseState, new WeakSet());
 }
@@ -134,7 +134,7 @@ export class ChildRenderCache {
     render(
         children: readonly unknown[],
         width: number,
-        collapseState: ComponentCollapseState,
+        collapseState: CollapseController,
         rangeMapper: ComponentRangeMapper,
     ): { lines: string[]; changed: boolean } {
         let changed = false;

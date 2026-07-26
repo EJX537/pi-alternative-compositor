@@ -8,7 +8,8 @@ import {
 } from "./input.js";
 import type { SelectionManager } from "./selection-manager.js";
 import type { TerminalModeManager } from "./terminal-mode-manager.js";
-import type { ComponentCollapseState } from "./collapse.js";
+import type { CollapseController } from "../collapse/collapse-controller.js";
+import { isCollapsibleComponent } from "../collapse/types.js";
 import type {
     RootComponentLineRange,
     SelectionLocation,
@@ -26,7 +27,7 @@ import { logDebug } from "./debug-log.js";
 export class MouseHandler {
     private readonly selectionManager: SelectionManager;
     private readonly modeManager: TerminalModeManager;
-    private readonly collapseState: ComponentCollapseState;
+    private readonly collapseState: CollapseController;
     private readonly onCopySelection: ((text: string) => void) | null;
     private readonly getRootComponentPathAtLine: (
         line: number,
@@ -42,7 +43,7 @@ export class MouseHandler {
     constructor(params: {
         selectionManager: SelectionManager;
         modeManager: TerminalModeManager;
-        collapseState: ComponentCollapseState;
+        collapseState: CollapseController;
         onCopySelection: ((text: string) => void) | null;
         getRootComponentPathAtLine: (
             line: number,
@@ -226,7 +227,11 @@ export class MouseHandler {
         ) {
             const path = this.getRootComponentPathAtLine(location.point.line);
             logDebug("release-toggle: path=", path.length, "line=", location.point.line);
-            const toggled = this.collapseState.toggle(path, location.point.line, sidebarMainWidth);
+            // Innermost collapsible component from the path
+            const target = [...path].reverse().find((r) => isCollapsibleComponent(r.component));
+            const toggled = target
+                ? this.collapseState.toggle(target.component, location.point.line)
+                : false;
             logDebug("release-toggle-result:", toggled);
             if (toggled) {
                 this.selectionManager.clearSelection();

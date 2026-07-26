@@ -1,4 +1,4 @@
-import { ComponentCollapseState } from "./collapse.js";
+import { CollapseController } from "../collapse/collapse-controller.js";
 import { ComponentRangeMapper } from "./range-mapper.js";
 import { MouseHandler } from "./mouse-handler.js";
 import { RenderEngine } from "./render-engine.js";
@@ -79,7 +79,7 @@ export class TerminalSplitCompositor {
     private rootStateRefreshedAfterInstall = false;
 
     // Sub-managers
-    readonly collapseState = new ComponentCollapseState();
+    readonly collapseState = new CollapseController();
     readonly rangeMapper = new ComponentRangeMapper();
     readonly selectionManager = new SelectionManager();
     readonly modeManager: TerminalModeManager;

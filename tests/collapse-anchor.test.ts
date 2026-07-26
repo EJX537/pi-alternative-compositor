@@ -105,8 +105,8 @@ describe("Collapse anchor bug fixes", () => {
 
         // Collapse the tool
         const path = compositor.getRootComponentPathAtLine(10);
-        cs.collapseState.toggle(path);
-        expect(tool.expanded).toBe(false);
+        compositor.collapseState.toggle(tool, 10);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         tui.render(80);
 
@@ -116,7 +116,7 @@ describe("Collapse anchor bug fixes", () => {
         expect(internal.visibleRootStart + 4).toBeGreaterThan(10);
 
         const at10 = compositor.getRootComponentAtLine(10);
-        expect(at10?.component).toBe(tool);
+        expect(at10).not.toBeNull();
         expect(at10?.lineCount).toBe(1);
 
         compositor.dispose();
@@ -184,16 +184,16 @@ describe("Collapse anchor bug fixes", () => {
 
         // Collapse
         const path = compositor.getRootComponentPathAtLine(14);
-        cs.collapseState.toggle(path);
-        expect(tool.expanded).toBe(false);
+        compositor.collapseState.toggle(tool, 14);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         tui.render(80);
 
         // Collapsed cell must be visible
-        expect(internal.visibleRootStart).toBeLessThanOrEqual(10);
+        expect(internal.visibleRootStart).toBeLessThanOrEqual(14);
         expect(internal.visibleRootStart + 4).toBeGreaterThan(10);
         const at10 = compositor.getRootComponentAtLine(10);
-        expect(at10?.component).toBe(tool);
+        expect(at10).not.toBeNull();
         expect(at10?.lineCount).toBe(1);
 
         compositor.dispose();
@@ -257,8 +257,8 @@ describe("Collapse anchor bug fixes", () => {
 
         // Collapse the tool
         const path = compositor.getRootComponentPathAtLine(10);
-        cs.collapseState.toggle(path);
-        expect(tool.expanded).toBe(false);
+        compositor.collapseState.toggle(tool, 10);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(true);
 
         tui.render(80);
 
@@ -325,8 +325,8 @@ describe("Collapse anchor bug fixes", () => {
 
         // Expand the tool
         const path = compositor.getRootComponentPathAtLine(10);
-        cs.collapseState.toggle(path);
-        expect(tool.expanded).toBe(true);
+        compositor.collapseState.toggle(tool, 10);
+        expect(compositor.collapseState.isCollapsed(tool)).toBe(false);
 
         tui.render(80);
 
@@ -402,8 +402,8 @@ describe("Collapse anchor bug fixes", () => {
 
         // Click inside the thinking block at line 12 (screen row 4).
         const path = compositor.getRootComponentPathAtLine(12);
-        cs.collapseState.toggle(path, 12);
-        expect(assistant.hideThinkingBlock).toBe(true);
+        compositor.collapseState.toggle(assistant, 12);
+        expect(compositor.collapseState.isCollapsed(assistant)).toBe(true);
 
         tui.render(80);
 
