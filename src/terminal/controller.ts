@@ -154,15 +154,7 @@ export class TerminalSplitCompositor {
 
     install(): void {
         if (this.installed) return;
-
-        const wasAlreadyInAltScreen = isAlternateScreenActive();
         this.originalWrite(this.modeManager.buildInstallSequence());
-        // Only paint the loading frame on cold start (new alternate screen).
-        // On resume/reload the old session's content is still on screen and
-        // overwriting it with "Loading..." causes a visible flash.
-        if (!wasAlreadyInAltScreen) {
-            this.renderEngine.paintIntermediateFrame("Loading compositor...");
-        }
         this.emergencyCleanup = () => {
             if (!this.disposed) {
                 this.restoreTerminalStateForExit();
