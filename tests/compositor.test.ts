@@ -138,7 +138,7 @@ describe("TerminalSplitCompositor installation", () => {
         const cleanup = writes.at(-1) ?? "";
         expect(cleanup).toContain("\x1b[r");
         expect(cleanup).toContain("\x1b[?1006l\x1b[?1002l\x1b[?1003l\x1b[?1000l");
-        expect(cleanup).toContain("\x1b[<1u");
+        expect(cleanup).toContain("\x1b[<u");
         expect(cleanup).toContain("\x1b[?1007h");
         expect(cleanup).toContain("\x1b[?1049l");
         expect(cleanup).toContain("\x1b[<999u\x1b[>4;0m");
@@ -148,13 +148,16 @@ describe("TerminalSplitCompositor installation", () => {
         expect(cleanup.indexOf("\x1b[?1007h")).toBeLessThan(
             cleanup.indexOf("\x1b[?1049l"),
         );
-        // Keyboard mode reset MUST come before alt-screen exit so Ghostty
-        // doesn't leave kitty protocol active on the primary screen.
-        const fullResetIdx = cleanup.indexOf("\x1b[<999u");
+        // Kitty protocol pop/reset MUST come AFTER the alt-screen exit so
+        // the sequences land on the MAIN screen's stack, where Pi pushed
+        // the protocol at startup, not the alt screen's empty stack.
         const exitAltIdx = cleanup.indexOf("\x1b[?1049l");
-        expect(fullResetIdx).not.toBe(-1);
+        const kittyPopIdx = cleanup.indexOf("\x1b[<u");
+        const fullResetIdx = cleanup.indexOf("\x1b[<999u");
         expect(exitAltIdx).not.toBe(-1);
-        expect(fullResetIdx).toBeLessThan(exitAltIdx);
+        expect(kittyPopIdx).not.toBe(-1);
+        expect(fullResetIdx).not.toBe(-1);
+        expect(exitAltIdx).toBeLessThan(kittyPopIdx);
 
         compositor.dispose();
     });

@@ -122,7 +122,7 @@ export function enableExtendedKeyboardMode(mode: ExtendedKeyboardMode): string {
 export function disableExtendedKeyboardMode(
     mode: ExtendedKeyboardMode,
 ): string {
-    return mode === "kitty" ? "\x1b[<1u" : "\x1b[>4;0m";
+    return mode === "kitty" ? "\x1b[<u" : "\x1b[>4;0m";
 }
 
 export function resetExtendedKeyboardModes(): string {

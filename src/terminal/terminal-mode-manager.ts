@@ -173,27 +173,32 @@ export class TerminalModeManager {
         // Ghostty may not process it reliably, leaving terminal modes (kitty
         // keyboard protocol, synchronized output, etc.) active.  This renders
         // shell input completely unusable until the terminal is reset.
-        const resetSequence =
+        // Everything that must happen WHILE the alternate screen is active.
+        const preExitAlt =
             beginSynchronizedOutput() +
             eraseDisplay() +
             homeCursor() +
             resetScrollRegion() +
             (this.mouseScroll ? this.emitDisableMouseReporting() : "") +
-            (activeMode ? disableExtendedKeyboardMode(activeMode) : "") +
             disableBracketedPaste() +
             enableAlternateScrollMode() +
+            endSynchronizedOutput();
+
+        // Kitty protocol pop/reset must happen AFTER \x1b[?1049l so it lands
+        // on the MAIN screen's stack where Pi pushed the protocol.
+        const postExitAlt =
+            (activeMode ? disableExtendedKeyboardMode(activeMode) : "") +
             (restoreMainScreenMode && activeMode
                 ? enableExtendedKeyboardMode(activeMode)
                 : "") +
-            (doFullKeyboardReset ? resetExtendedKeyboardModes() : "") +
-            endSynchronizedOutput();
+            (doFullKeyboardReset ? resetExtendedKeyboardModes() : "");
 
-        // \x1b[?1049l MUST be the very last sequence so that every mode
-        // reset is processed while still inside the alternate screen.
-        return exitingAltScreen
-            ? (setAlternateScreenActive(false),
-              resetSequence + exitAlternateScreen())
-            : resetSequence;
+        if (!exitingAltScreen) {
+            return preExitAlt;
+        }
+
+        setAlternateScreenActive(false);
+        return preExitAlt + exitAlternateScreen() + postExitAlt;
     }
 
     /** Build terminal restore for process-exit cleanup. */
