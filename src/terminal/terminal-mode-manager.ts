@@ -36,7 +36,7 @@ type GlobalWithAlternateScreen = typeof globalThis & {
     [ALTERNATE_SCREEN_KEY]?: boolean;
 };
 
-function isAlternateScreenActive(): boolean {
+export function isAlternateScreenActive(): boolean {
     return (globalThis as GlobalWithAlternateScreen)[ALTERNATE_SCREEN_KEY] === true;
 }
 

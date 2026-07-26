@@ -3,7 +3,7 @@ import { ComponentRangeMapper } from "./range-mapper.js";
 import { MouseHandler } from "./mouse-handler.js";
 import { RenderEngine } from "./render-engine.js";
 import { SelectionManager } from "./selection-manager.js";
-import { TerminalModeManager } from "./terminal-mode-manager.js";
+import { TerminalModeManager, isAlternateScreenActive } from "./terminal-mode-manager.js";
 import {
     isMouseMotion,
     isMouseRelease,
@@ -155,8 +155,14 @@ export class TerminalSplitCompositor {
     install(): void {
         if (this.installed) return;
 
+        const wasAlreadyInAltScreen = isAlternateScreenActive();
         this.originalWrite(this.modeManager.buildInstallSequence());
-        this.renderEngine.paintIntermediateFrame("Loading compositor...");
+        // Only paint the loading frame on cold start (new alternate screen).
+        // On resume/reload the old session's content is still on screen and
+        // overwriting it with "Loading..." causes a visible flash.
+        if (!wasAlreadyInAltScreen) {
+            this.renderEngine.paintIntermediateFrame("Loading compositor...");
+        }
         this.emergencyCleanup = () => {
             if (!this.disposed) {
                 this.restoreTerminalStateForExit();
