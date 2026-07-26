@@ -58,21 +58,43 @@ export function isToolComponent(
 }
 
 /**
- * Check whether a component looks like the thinking-block Markdown child
- * inside an AssistantMessageComponent.
+ * Check whether a component looks like a thinking-block marker — either
+ * the visible (Markdown with italic style) or hidden (Text placeholder)
+ * state.
  *
- * Pi's AssistantMessageComponent creates a Markdown child with
- * `{italic: true, color: thinkingText}` for the visible thinking block.
+ * - **Visible** thinking: a `Markdown` child whose `defaultTextStyle.italic`
+ *   is `true`.  Pi's `AssistantMessageComponent` creates these with
+ *   `{italic: true, color: thinkingText}`.
+ * - **Hidden** thinking (already collapsed): a `Text` component with no
+ *   children, no `defaultTextStyle`, no `theme`, and no `lines`.
  */
 export function isThinkingMarkdown(comp: unknown): boolean {
     if (!comp || typeof comp !== "object") return false;
     const c = comp as Record<string, unknown>;
+
+    // Visible thinking: Markdown with italic defaultTextStyle.
     const ds = c.defaultTextStyle;
-    return (
+    if (
         typeof ds === "object" &&
         ds !== null &&
         (ds as Record<string, unknown>).italic === true
-    );
+    ) {
+        return true;
+    }
+
+    // Hidden thinking: Text component with no children/theme/lines/defaultTextStyle
+    // but with a render function.
+    if (
+        !Array.isArray(c.children) &&
+        c.defaultTextStyle === undefined &&
+        c.lines === undefined &&
+        c.theme === undefined &&
+        typeof c.render === "function"
+    ) {
+        return true;
+    }
+
+    return false;
 }
 
 /**

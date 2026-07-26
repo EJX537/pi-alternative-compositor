@@ -149,12 +149,31 @@ export class TerminalModeManager {
 
         const activeMode =
             this.extendedKeyboardMode ?? this.activeExtendedKeyboardMode();
+
+        // When exiting the alternate screen (returning to the shell), always
+        // do a full keyboard-mode reset.  The shell does not want kitty
+        // keyboard protocol or modifyOtherKeys active — either would garble
+        // every keystroke by encoding them as longer escape sequences.
+        const exitingAltScreen = options.exitAlternateScreen !== false;
+        const doFullKeyboardReset =
+            exitingAltScreen || options.resetExtendedKeyboardModes === true;
+
+        // restoreMainScreenMode only applies when staying in Pi (session
+        // switch, not quit): re-enable the keyboard mode that Pi itself
+        // uses on the main screen.
         const restoreMainScreenMode =
+            !exitingAltScreen &&
             !options.resetExtendedKeyboardModes &&
             this.extendedKeyboardMode === null &&
             activeMode !== null;
 
-        return (
+        // Ghostty-specific: ALL mode-reset sequences must be sent BEFORE
+        // \x1b[?1049l (exit alternate screen).  If any escape sequence is sent
+        // AFTER the alt-screen exit, it lands on the primary screen where
+        // Ghostty may not process it reliably, leaving terminal modes (kitty
+        // keyboard protocol, synchronized output, etc.) active.  This renders
+        // shell input completely unusable until the terminal is reset.
+        const resetSequence =
             beginSynchronizedOutput() +
             eraseDisplay() +
             homeCursor() +
@@ -163,17 +182,18 @@ export class TerminalModeManager {
             (activeMode ? disableExtendedKeyboardMode(activeMode) : "") +
             disableBracketedPaste() +
             enableAlternateScrollMode() +
-            (options.exitAlternateScreen !== false
-                ? (setAlternateScreenActive(false), exitAlternateScreen())
-                : "") +
             (restoreMainScreenMode && activeMode
                 ? enableExtendedKeyboardMode(activeMode)
                 : "") +
-            (options.resetExtendedKeyboardModes
-                ? resetExtendedKeyboardModes()
-                : "") +
-            endSynchronizedOutput()
-        );
+            (doFullKeyboardReset ? resetExtendedKeyboardModes() : "") +
+            endSynchronizedOutput();
+
+        // \x1b[?1049l MUST be the very last sequence so that every mode
+        // reset is processed while still inside the alternate screen.
+        return exitingAltScreen
+            ? (setAlternateScreenActive(false),
+              resetSequence + exitAlternateScreen())
+            : resetSequence;
     }
 
     /** Build terminal restore for process-exit cleanup. */

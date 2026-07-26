@@ -138,7 +138,7 @@ describe("TerminalSplitCompositor installation", () => {
         const cleanup = writes.at(-1) ?? "";
         expect(cleanup).toContain("\x1b[r");
         expect(cleanup).toContain("\x1b[?1006l\x1b[?1002l\x1b[?1003l\x1b[?1000l");
-        expect(cleanup).toContain("\x1b[<u");
+        expect(cleanup).toContain("\x1b[<1u");
         expect(cleanup).toContain("\x1b[?1007h");
         expect(cleanup).toContain("\x1b[?1049l");
         expect(cleanup).toContain("\x1b[<999u\x1b[>4;0m");
@@ -148,6 +148,13 @@ describe("TerminalSplitCompositor installation", () => {
         expect(cleanup.indexOf("\x1b[?1007h")).toBeLessThan(
             cleanup.indexOf("\x1b[?1049l"),
         );
+        // Keyboard mode reset MUST come before alt-screen exit so Ghostty
+        // doesn't leave kitty protocol active on the primary screen.
+        const fullResetIdx = cleanup.indexOf("\x1b[<999u");
+        const exitAltIdx = cleanup.indexOf("\x1b[?1049l");
+        expect(fullResetIdx).not.toBe(-1);
+        expect(exitAltIdx).not.toBe(-1);
+        expect(fullResetIdx).toBeLessThan(exitAltIdx);
 
         compositor.dispose();
     });
@@ -423,7 +430,14 @@ describe("TerminalSplitCompositor installation", () => {
         };
         // Toggle thinking on the original message, then emulate Pi recreating it.
         tui.children = [assistant];
-        assistant.children = [];
+        // Add a thinking-markdown child so the range mapper can find it.
+        const thinkingChild = {
+            defaultTextStyle: { italic: true },
+            render: () => ["thinking"],
+        };
+        assistant.children = [thinkingChild];
+        // The parent's render output must be exactly the concatenation of
+        // its children for the range mapper's fast-path to match.
         assistant.render = () => ["thinking"];
         assistant.hideThinkingBlock = false;
         tui.render(80);
@@ -537,12 +551,19 @@ describe("TerminalSplitCompositor installation", () => {
     it("toggles an assistant message through multiple clicks even when Pi rebuilds it", () => {
         const { options } = createOptions();
         const hidden: boolean[] = [];
-        const makeAssistant = () => ({
-            lastMessage: { role: "assistant", id: "msg-multi" },
-            hideThinkingBlock: false,
-            setHideThinkingBlock: () => {},
-            render: () => ["thinking"],
-        });
+        const makeAssistant = () => {
+            const thinkingChild = {
+                defaultTextStyle: { italic: true },
+                render: () => ["thinking"],
+            };
+            return {
+                lastMessage: { role: "assistant", id: "msg-multi" },
+                hideThinkingBlock: false,
+                setHideThinkingBlock: () => {},
+                children: [thinkingChild],
+                render: () => ["thinking"],
+            };
+        };
         const tui = options.tui as unknown as {
             children: unknown[];
             render: (width: number) => string[];

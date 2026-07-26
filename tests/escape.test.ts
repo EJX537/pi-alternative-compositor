@@ -131,7 +131,7 @@ describe("escape sequences", () => {
         });
 
         it("disableExtendedKeyboardMode kitty", () => {
-            expect(disableExtendedKeyboardMode("kitty")).toBe("\x1b[<u");
+            expect(disableExtendedKeyboardMode("kitty")).toBe("\x1b[<1u");
         });
 
         it("disableExtendedKeyboardMode modifyOtherKeys", () => {

@@ -9,7 +9,7 @@ import {
 import type { SelectionManager } from "./selection-manager.js";
 import type { TerminalModeManager } from "./terminal-mode-manager.js";
 import type { CollapseController } from "../collapse/collapse-controller.js";
-import { isCollapsibleComponent } from "../collapse/types.js";
+import { isCollapsibleComponent, isAssistantComponent, isThinkingMarkdown } from "../collapse/types.js";
 import type {
     RootComponentLineRange,
     SelectionLocation,
@@ -229,7 +229,18 @@ export class MouseHandler {
             logDebug("release-toggle: path=", path.length, "line=", location.point.line);
             // Innermost collapsible component from the path
             const target = [...path].reverse().find((r) => isCollapsibleComponent(r.component));
-            const toggled = target
+
+            // For assistants: only toggle thinking if click was on the thinking
+            // block itself, not on response text.
+            let isOnThinkingBlock = true;
+            if (target && isAssistantComponent(target.component)) {
+                const idx = path.indexOf(target);
+                isOnThinkingBlock = path.slice(idx + 1).some(
+                    (r) => isThinkingMarkdown(r.component),
+                );
+            }
+
+            const toggled = target && isOnThinkingBlock
                 ? this.collapseState.toggle(target.component, location.point.line)
                 : false;
             logDebug("release-toggle-result:", toggled);

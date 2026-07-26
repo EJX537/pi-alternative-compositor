@@ -691,6 +691,23 @@ export class RenderEngine {
         const changed = this.getAndClearChangedComponents();
         if (changed.size > 0 && this.estimateAffectedLines(changed) <= 10) {
             this.incrementalRepaint(changed);
+            // Cluster + sidebar may have changed (editor grew/shrunk) even
+            // if root changes were small.  Always repaint them to keep the
+            // editor area in sync with the current scrollable root height.
+            // write() invalidated renderPassCluster, so getCluster() fetches
+            // fresh editor content here.
+            this.renderPassCluster = null;
+            const cluster = this.getCluster(width, rawRows);
+            const clusterAndSidebar =
+                buildFixedClusterPaint(
+                    this.decorateCluster(cluster),
+                    rawRows,
+                    width,
+                    this.getShowHardwareCursor(),
+                ) +
+                this.buildSidebarPaint() +
+                this.getMouseReportingGuard();
+            this.originalWrite(clusterAndSidebar);
             return;
         }
 
@@ -1106,6 +1123,12 @@ export class RenderEngine {
         // Cluster + sidebar decoration is handled by the next renderFrame().
         // This avoids wrapping every keystroke in ~500 bytes of cluster
         // repaint, making typing feel significantly more responsive.
+        //
+        // Invalidate the cluster cache so the next renderFrame() fetches
+        // fresh editor content.  Without this, getCluster() returns stale
+        // lines when the editor wraps to a new line, causing the
+        // scrollable-root/cluster boundary to be wrong for one frame.
+        this.renderPassCluster = null;
         this.originalWrite(data);
     }
 }
