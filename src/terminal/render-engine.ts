@@ -12,6 +12,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import {
     sanitizeLine,
 } from "../compositor/text.js";
+
 import { resolveSidebarLayout } from "../compositor/layout.js";
 import { buildFixedClusterPaint } from "../compositor/frame.js";
 import { readColumns, readRows } from "../pi/dimensions.js";
@@ -33,13 +34,14 @@ import type {
 import type { TuiInternals, TerminalInternals } from "../pi/internals.js";
 import type { Terminal } from "@earendil-works/pi-tui";
 import type { SidebarOptions } from "./types.js";
+import {
+    captureRootViewportAnchor,
+    offsetForRootViewportAnchor,
+    type RootViewportAnchor,
+} from "./viewport-anchor.js";
+import { composeOverlayFrameLine } from "./overlay-frame.js";
 
 const RANGE_MAP_OVERSCAN_LINES = 10;
-
-type RootViewportAnchor = {
-    component: RootComponentLineRange["component"];
-    lineOffset: number;
-};
 
 // ── RenderEngine ─────────────────────────────────────────────
 
@@ -338,7 +340,12 @@ export class RenderEngine {
         const previousScrollOffset = this.scrollOffset;
 
         const rootChildren = this.getRootChildren();
-        const anchor = this.captureRootViewportAnchor(rootChildren);
+        const anchor = captureRootViewportAnchor(
+            this.rootComponentLineRanges,
+            this.visibleRootStart,
+            this.scrollOffset,
+            rootChildren,
+        );
 
         // A collapse toggle can change a component's size without the parent
         // root child's own signature changing, so clear the range-mapper cache
@@ -373,8 +380,9 @@ export class RenderEngine {
 
         // General viewport anchoring: keeps content at the first visible line
         // stable when total line count changes (content growth or shrinkage).
-        const anchoredOffset = this.offsetForRootViewportAnchor(
+        const anchoredOffset = offsetForRootViewportAnchor(
             anchor,
+            this.rootComponentLineRanges,
             lines.length,
             scrollableRows,
         );
@@ -818,28 +826,13 @@ export class RenderEngine {
                 : [];
         const sidebarStart = Math.max(0, mainLines.length - rawRows);
         return mainLines.map((mainLine, index) =>
-            this.composeOverlayFrameLine(
+            composeOverlayFrameLine(
                 mainLine,
                 sidebarLines[index - sidebarStart] ?? "",
                 layout.mainWidth,
                 layout.sidebarWidth,
             ),
         );
-    }
-
-    private composeOverlayFrameLine(
-        mainLine: string,
-        sidebarLine: string,
-        mainWidth: number,
-        sidebarWidth: number,
-    ): string {
-        const main = sanitizeLine(mainLine, mainWidth);
-        const mainPadding = " ".repeat(
-            Math.max(0, mainWidth - visibleWidth(main)),
-        );
-        const sidebar =
-            sidebarWidth > 0 ? sanitizeLine(sidebarLine, sidebarWidth) : "";
-        return `${main}${mainPadding}${sidebar}`;
     }
 
     // ── Component line ranges ───────────────────────────────
@@ -914,57 +907,6 @@ export class RenderEngine {
 
     getRootComponentAtLine(line: number): RootComponentLineRange | null {
         return this.getRootComponentPathAtLine(line).at(-1) ?? null;
-    }
-
-    // ── Viewport anchor ─────────────────────────────────────
-
-    private captureRootViewportAnchor(
-        rootChildren?: readonly unknown[],
-    ): RootViewportAnchor | null {
-        if (this.scrollOffset === 0) return null;
-
-        // Capture the outermost (root-level) component at the first visible line.
-        // Root-level children are always in the component line ranges (the mapper
-        // adds every root child unconditionally), so this anchor survives
-        // collapse/expand. Using the innermost child would be wrong because that
-        // child (e.g. a tool output line) may disappear when its parent collapses,
-        // leaving us without a valid anchor.
-        const children = rootChildren ?? this.getRootChildren();
-        const rootComponents = new Set<object>(
-            children.filter(
-                (c) => typeof c === "object" && c !== null,
-            ) as object[],
-        );
-        const range = this.rootComponentLineRanges.find(
-            (r) =>
-                rootComponents.has(r.component as object) &&
-                this.visibleRootStart >= r.startLine &&
-                this.visibleRootStart < r.startLine + r.lineCount,
-        );
-        if (!range || range.lineCount === 0) return null;
-        return {
-            component: range.component,
-            lineOffset: this.visibleRootStart - range.startLine,
-        };
-    }
-
-    private offsetForRootViewportAnchor(
-        anchor: RootViewportAnchor | null,
-        lineCount: number,
-        viewportRows: number,
-    ): number | null {
-        if (!anchor) return null;
-        const range = this.rootComponentLineRanges.find(
-            (candidate) => candidate.component === anchor.component,
-        );
-        if (!range || range.lineCount === 0 || lineCount === 0) return null;
-
-        const desiredStart = Math.min(
-            lineCount - 1,
-            range.startLine +
-                Math.min(anchor.lineOffset, range.lineCount - 1),
-        );
-        return Math.max(0, lineCount - viewportRows - desiredStart);
     }
 
     // ── Cluster ─────────────────────────────────────────────

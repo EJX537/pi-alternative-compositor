@@ -2,6 +2,7 @@ import { CollapseController } from "../collapse/collapse-controller.js";
 import { ComponentRangeMapper } from "./range-mapper.js";
 import { MouseHandler } from "./mouse-handler.js";
 import { RenderEngine } from "./render-engine.js";
+import { ScrollCoalescer } from "./scroll-coalescer.js";
 import { SelectionManager } from "./selection-manager.js";
 import { TerminalModeManager, isAlternateScreenActive } from "./terminal-mode-manager.js";
 import {
@@ -65,13 +66,12 @@ export class TerminalSplitCompositor {
     private originalRowsDescriptor: PropertyDescriptor | undefined;
     private originalColumnsDescriptor: PropertyDescriptor | undefined;
 
-    // Scroll coalescing state. Some terminals (notably Ghostty) deliver wheel
+    // Scroll coalescing. Some terminals (notably Ghostty) deliver wheel
     // events in rapid separate stdin reads; each read currently triggers a full
     // repaint. We accumulate deltas and flush once per short window.
-    private pendingScrollDelta = 0;
-    private pendingScrollOptions?: { preserveSelection?: boolean };
-    private pendingScrollTimer: ReturnType<typeof setTimeout> | null = null;
-    private lastScrollDirection = 0;
+    private readonly scrollCoalescer = new ScrollCoalescer(
+        (delta, options) => this.scrollBy(delta, options),
+    );
 
     // True after the first lazy force-refresh following install, so that
     // subsequent mouse events can use the lightweight re-map path without
@@ -322,7 +322,7 @@ export class TerminalSplitCompositor {
         )
             return false;
 
-        this.flushPendingScroll();
+        this.scrollCoalescer.flush();
         this.selectionManager.clearSelection();
         this.selectionManager.lastPress = null;
         this.selectionManager.leftPressLocation = null;
@@ -378,7 +378,7 @@ export class TerminalSplitCompositor {
 
     dispose(options: DisposeOptions = {}): void {
         if (this.disposed) return;
-        this.flushPendingScroll();
+        this.scrollCoalescer.flush();
         this.disposed = true;
         this.modeManager.markDisposed();
 
@@ -481,7 +481,7 @@ export class TerminalSplitCompositor {
             // Press/release interactions must operate on the current viewport,
             // so flush any pending wheel scroll before refreshing hit-testing.
             if (hasPressOrRelease) {
-                this.flushPendingScroll();
+                this.scrollCoalescer.flush();
             }
 
             // Mouse hit-testing state is normally refreshed by paintFullFrame(),
@@ -551,7 +551,7 @@ export class TerminalSplitCompositor {
             }
 
             if (wheelDelta !== 0) {
-                this.scheduleScrollBy(wheelDelta);
+                this.scrollCoalescer.schedule(wheelDelta);
             }
             if (mouseResult.consumed === data.length) {
                 return { consume: true };
@@ -567,7 +567,7 @@ export class TerminalSplitCompositor {
         const keyboardDelta = parseKeyboardScrollDelta(data);
         if (keyboardDelta === 0) return undefined;
 
-        this.scheduleScrollBy(keyboardDelta);
+        this.scrollCoalescer.schedule(keyboardDelta);
         return { consume: true };
     }
 
@@ -612,62 +612,6 @@ export class TerminalSplitCompositor {
         }
     }
 
-    /**
-     * Coalesce scroll deltas across rapid input events and flush once per
-     * short window. This is especially helpful for terminals (notably Ghostty)
-     * that deliver wheel events in many separate stdin reads.
-     */
-    private scheduleScrollBy(
-        delta: number,
-        options?: { preserveSelection?: boolean },
-    ): void {
-        if (process.env.PI_COMPOSITOR_NO_SCROLL_THROTTLE === "1") {
-            this.scrollBy(delta, options);
-            return;
-        }
-
-        const direction = Math.sign(delta);
-        if (
-            this.pendingScrollDelta !== 0 &&
-            direction !== this.lastScrollDirection
-        ) {
-            // Direction changed: flush the previous batch immediately so the
-            // viewport doesn't jump in the wrong direction later.
-            this.flushPendingScroll();
-        }
-
-        this.pendingScrollDelta += delta;
-        this.pendingScrollOptions ??= options;
-
-        if (this.pendingScrollTimer) return;
-
-        this.pendingScrollTimer = setTimeout(() => {
-            this.flushPendingScroll();
-        }, 8);
-
-        if (
-            typeof this.pendingScrollTimer === "object" &&
-            "unref" in this.pendingScrollTimer
-        ) {
-            this.pendingScrollTimer.unref();
-        }
-    }
-
-    private flushPendingScroll(): void {
-        if (this.pendingScrollTimer) {
-            clearTimeout(this.pendingScrollTimer);
-            this.pendingScrollTimer = null;
-        }
-        if (this.pendingScrollDelta === 0) return;
-
-        const delta = this.pendingScrollDelta;
-        const options = this.pendingScrollOptions;
-        this.pendingScrollDelta = 0;
-        this.pendingScrollOptions = undefined;
-        this.lastScrollDirection = Math.sign(delta);
-        this.scrollBy(delta, options);
-    }
-
     private jumpToRootTarget(
         targetLines: readonly number[],
         direction: "previous" | "next",
@@ -679,7 +623,7 @@ export class TerminalSplitCompositor {
         )
             return false;
 
-        this.flushPendingScroll();
+            this.scrollCoalescer.flush();
         const start = this.renderEngine.currentVisibleRootStart;
         const candidates =
             direction === "previous"
