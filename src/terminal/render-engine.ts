@@ -71,6 +71,8 @@ export class RenderEngine {
     private patchedRenders: RenderPatch[] = [];
     private renderPassActive = false;
     private renderPassCluster: RenderPassCluster | null = null;
+    /** Monotonically increasing; cache hit in getCluster() only when generations match. */
+    private clusterGeneration = 0;
     private renderingCluster = false;
     private renderingScrollableRoot = false;
     private checkingOverlay = false;
@@ -566,7 +568,7 @@ export class RenderEngine {
         // Ensure the cluster is rendered fresh for full repaints so cursor
         // position, editor content, and other cluster state that may have
         // changed without a write() (e.g. cursor movement) are picked up.
-        this.renderPassCluster = null;
+        this.clusterGeneration++;
 
         const rawRows = this.getRawRows();
         const width = this.getSidebarLayout().mainWidth;
@@ -971,13 +973,14 @@ export class RenderEngine {
         width: number,
         terminalRows: number,
     ): FixedEditorClusterRender {
-        // Always check the persistent cache first, regardless of render pass
-        // state.  This lets scroll calls reuse the cluster render across
-        // multiple scroll ticks.  The cache is invalidated in write() and
-        // paintFullFrame() when fresh content is needed.
+        // Cache hit when dimensions AND generation match.  write() and
+        // paintFullFrame() bump the generation so the next getCluster()
+        // re-renders fresh content.  Spinner ticks keep the same generation
+        // and reuse the cached cluster.
         if (
             this.renderPassCluster?.width === width &&
-            this.renderPassCluster.terminalRows === terminalRows
+            this.renderPassCluster.terminalRows === terminalRows &&
+            this.renderPassCluster.generation === this.clusterGeneration
         ) {
             return this.renderPassCluster.cluster;
         }
@@ -986,8 +989,18 @@ export class RenderEngine {
             this.renderCluster(width, terminalRows),
         );
         this.visibleClusterLines = cluster.lines;
-        this.renderPassCluster = { width, terminalRows, cluster };
+        this.renderPassCluster = {
+            width,
+            terminalRows,
+            generation: this.clusterGeneration,
+            cluster,
+        };
         return cluster;
+    }
+
+    /** Bump the cluster generation so the next getCluster() re-renders. */
+    invalidateClusterCache(): void {
+        this.clusterGeneration++;
     }
 
     decorateCluster(
@@ -1124,11 +1137,11 @@ export class RenderEngine {
         // This avoids wrapping every keystroke in ~500 bytes of cluster
         // repaint, making typing feel significantly more responsive.
         //
-        // Invalidate the cluster cache so the next renderFrame() fetches
+        // Bump the cluster generation so the next renderFrame() re-renders
         // fresh editor content.  Without this, getCluster() returns stale
         // lines when the editor wraps to a new line, causing the
         // scrollable-root/cluster boundary to be wrong for one frame.
-        this.renderPassCluster = null;
+        this.clusterGeneration++;
         this.originalWrite(data);
     }
 }

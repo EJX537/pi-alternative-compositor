@@ -286,6 +286,11 @@ export class TerminalSplitCompositor {
                 "rootLines=",
                 this.renderEngine.currentRootLines.length,
             );
+            // The eager refresh caches the cluster before Pi may have
+            // fully populated tui.children.  Bump the generation so the
+            // first renderFrame() re-renders the cluster with the complete
+            // child set.
+            this.renderEngine.invalidateClusterCache();
         } catch (err) {
             logDebug("install-eager-refresh-error:", err);
         }

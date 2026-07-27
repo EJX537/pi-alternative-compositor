@@ -45,6 +45,8 @@ export interface RenderPatch {
 export interface RenderPassCluster {
     width: number;
     terminalRows: number;
+    /** Monotonically increasing generation; cache hit only when generation matches. */
+    generation: number;
     cluster: FixedEditorClusterRender;
 }
 
