@@ -77,7 +77,20 @@ function signatureForComponent(
             String(contentLength(component.lastMessage)),
         );
     } else {
-        parts.push("unknown", String(stableObjectId(component)));
+        // Include `text` (Text/Loader components) or `content`
+        // (generic components) so content changes bust the render
+        // cache.  Without this, animated components like the
+        // CompactionStatusIndicator spinner never refresh because
+        // stableObjectId + width don't change when the spinner
+        // frame cycles.
+        const textContent =
+            (component as { text?: unknown }).text ??
+            (component as { content?: unknown }).content;
+        parts.push(
+            "unknown",
+            String(stableObjectId(component)),
+            String(textContent),
+        );
     }
 
     parts.push(String(width));
