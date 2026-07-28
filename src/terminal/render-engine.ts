@@ -1079,11 +1079,13 @@ export class RenderEngine {
         // This avoids wrapping every keystroke in ~500 bytes of cluster
         // repaint, making typing feel significantly more responsive.
         //
-        // Bump the cluster generation so the next renderFrame() re-renders
-        // fresh editor content.  Without this, getCluster() returns stale
-        // lines when the editor wraps to a new line, causing the
-        // scrollable-root/cluster boundary to be wrong for one frame.
-        this.clusterGeneration++;
+        // We do NOT bump clusterGeneration here.  The cluster (input bar) is
+        // static during streaming (no user typing), so bumping it on every
+        // write would waste a terminal-emulator render every frame.
+        // handleInput() invalidates the cluster cache before processing user
+        // input, so keyboard/mouse writes always see fresh cluster state.
+        // System writes that change cluster state (rare) accept a one-frame
+        // delay in the cluster render — imperceptible at 60fps.
         this.originalWrite(data);
     }
 }

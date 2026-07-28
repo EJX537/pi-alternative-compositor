@@ -38,44 +38,63 @@ function stableObjectId(obj: object): number {
 }
 
 /**
- * Recursively build a deterministic signature for a component.
+ * Bernstein (djb2) hash — combines a string into an existing hash state.
+ * Returns a 32-bit signed integer (via `| 0`).
+ */
+function hashString(h: number, s: string): number {
+    for (let i = 0; i < s.length; i++) {
+        h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+    }
+    return h;
+}
+
+/**
+ * Combine a numeric value into an existing hash state (avoids string
+ * conversion for child hashes which are already numbers).
+ */
+function hashNumber(h: number, n: number): number {
+    return ((h << 5) - h + n) | 0;
+}
+
+/**
+ * Recursively build a deterministic 32-bit hash signature for a component.
  *
- * The signature includes the component's own collapse state and content
- * fingerprint, plus the signatures of all its children.  This means that
+ * The hash includes the component's own collapse state and content
+ * fingerprint, plus the hashes of all its children.  This means that
  * collapsing a tool nested inside an assistant message changes the assistant's
- * signature, so the assistant's cached rendered lines are invalidated and the
+ * hash, so the assistant's cached rendered lines are invalidated and the
  * viewport line count updates correctly.
+ *
+ * Using a numeric hash instead of a string signature eliminates the
+ * per-component string-allocation overhead (the old `parts.join("|")`)
+ * while maintaining the same change-detection semantics.
  */
 function signatureForComponent(
     component: unknown,
     width: number,
     collapseState: CollapseController,
     seen: WeakSet<object>,
-): string {
+): number {
     if (!component || typeof component !== "object") {
-        return String(component);
+        return hashString(0, String(component));
     }
     if (seen.has(component)) {
-        return "<cycle>";
+        return hashString(0, "<cycle>");
     }
     seen.add(component);
 
-    const parts: string[] = [];
+    let h = 0;
     if (isToolComponent(component)) {
-        parts.push(
-            "tool",
-            component.toolCallId,
-            component.toolName,
-            String(collapseState.isCollapsed(component)),
-            String(contentLength(component)),
-        );
+        h = hashString(h, "tool");
+        h = hashString(h, component.toolCallId);
+        h = hashString(h, component.toolName);
+        h = hashString(h, String(collapseState.isCollapsed(component)));
+        h = hashString(h, String(contentLength(component)));
     } else if (isAssistantComponent(component)) {
-        parts.push(
-            "assistant",
-            String(stableObjectId(component.lastMessage)),
-            String(collapseState.isCollapsed(component)),
-            String(contentLength(component.lastMessage)),
-        );
+        h = hashString(h, "assistant");
+        h = hashString(h, String(stableObjectId(component.lastMessage)));
+        h = hashString(h, String(collapseState.isCollapsed(component)));
+        h = hashString(h, String(contentLength(component.lastMessage)));
     } else {
         // Include `text` (Text/Loader components) or `content`
         // (generic components) so content changes bust the render
@@ -86,39 +105,33 @@ function signatureForComponent(
         const textContent =
             (component as { text?: unknown }).text ??
             (component as { content?: unknown }).content;
-        parts.push(
-            "unknown",
-            String(stableObjectId(component)),
-            String(textContent),
-        );
+        h = hashString(h, "unknown");
+        h = hashString(h, String(stableObjectId(component)));
+        h = hashString(h, String(textContent));
     }
 
-    parts.push(String(width));
+    h = hashString(h, String(width));
 
     const children = (component as { children?: unknown }).children;
     if (Array.isArray(children)) {
         for (const child of children) {
-            parts.push(
-                signatureForComponent(child, width, collapseState, seen),
-            );
+            h = hashNumber(h, signatureForComponent(child, width, collapseState, seen));
         }
     } else if (children && typeof children === "object") {
-        parts.push(
-            signatureForComponent(children, width, collapseState, seen),
-        );
+        h = hashNumber(h, signatureForComponent(children, width, collapseState, seen));
     }
 
     // Do NOT delete from `seen`: a component may appear multiple times in
     // its own descendant tree (shared children), and removing it here would
     // defeat cycle detection for those paths.
-    return parts.join("|");
+    return h;
 }
 
 function signatureForChild(
     component: object,
     width: number,
     collapseState: CollapseController,
-): string {
+): number {
     return signatureForComponent(component, width, collapseState, new WeakSet());
 }
 
@@ -126,7 +139,8 @@ function signatureForChild(
 
 interface CachedEntry {
     lines: string[];
-    signature: string;
+    /** 32-bit hash of the component's full recursive state */
+    signature: number;
 }
 
 // ── Exports ──────────────────────────────────────────────────
