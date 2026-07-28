@@ -140,12 +140,16 @@ export class TerminalModeManager {
 
     /** Build the terminal restore escape sequence. */
     restoreTerminalState(options: DisposeOptions = {}): string {
-        // During `/reload` the new extension instance will repaint immediately.
-        // Erasing the screen here leaves a blank frame between instances, so
-        // we emit nothing and let the new install re-establish modes.
-        if (options.reason === "reload") {
-            return "";
-        }
+          // During session switches the new compositor will repaint
+          // immediately.  Erasing the screen here drops Pi's existing frame,
+          // leaving Pi's restore-protocol writes visible on a blank canvas.
+          if (
+              options.reason === "reload" ||
+              options.reason === "resume" ||
+              options.reason === "fork"
+          ) {
+              return "";
+          }
 
         const activeMode =
             this.extendedKeyboardMode ?? this.activeExtendedKeyboardMode();

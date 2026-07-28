@@ -14,6 +14,11 @@ void getSidebarRegistry();
 export default function fixedEditorCompositor(pi: ExtensionAPI): void {
     const lifecycle = new CompositorLifecycle();
 
+    // Cache the TUI reference so we can install the compositor synchronously
+    // on session_start for /resume /reload /fork — before Pi's first render
+    // paints native elements without the compositor intercepting them.
+    let cachedTui: TuiInternals | null = null;
+
     pi.registerCommand("compositor", {
         description: "Open compositor settings",
         handler: async (_args, ctx) =>
@@ -23,11 +28,6 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
     pi.on("session_start", (event, ctx) => {
         if (ctx.mode !== "tui") return;
 
-        // Load settings synchronously before registering the widget.  The
-        // compositor must be installed on the very next Pi render so it can
-        // take over the screen; an async settings load here would leave a
-        // window where the sidebar could flash on /resume before settings
-        // resolved.
         const settings = loadSettingsSync();
         lifecycle.sidebar.enabled = settings.enableSidebar;
         lifecycle.sidebar.visible =
@@ -35,20 +35,23 @@ export default function fixedEditorCompositor(pi: ExtensionAPI): void {
             event.reason !== "new" &&
             ctx.sessionManager.getBranch().some((entry) => entry.type === "message");
 
+        // Session switch: install compositor NOW using cached TUI, before
+        // Pi processes any renders for the new session.  The widget callback
+        // below will fire later and become a no-op (setup returns early).
+        if (cachedTui && event.reason !== "new") {
+            lifecycle.setup(ctx, cachedTui);
+        }
+
         ctx.ui.setWidget(
             WIDGET_KEY,
             (tui: TUI) => {
-                lifecycle.setup(ctx, tui as unknown as TuiInternals);
+                const tuiInternals = tui as unknown as TuiInternals;
+                if (!cachedTui) cachedTui = tuiInternals;
+                lifecycle.setup(ctx, tuiInternals);
                 return { render: () => [], invalidate: () => {} };
             },
             { placement: "aboveEditor" },
         );
-
-        // Note: pi-coding-agent renders one default-pi frame before
-        // session_start fires (see interactive-mode.js ui.start() before
-        // rebindCurrentSession()). That one-frame flash can only be fixed
-        // upstream; the compositor's install sequence clears the screen as
-        // soon as it is loaded.
     });
 
     pi.on("agent_start", () => lifecycle.setSidebarVisible(true));

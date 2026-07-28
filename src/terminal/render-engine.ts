@@ -639,8 +639,8 @@ export class RenderEngine {
      * Used for small animated updates (spinners, progress indicators) where the
      * overhead of a full paintFullFrame would cause visible jank.
      */
-    incrementalRepaint(changed: Set<object>): void {
-        if (changed.size === 0) return;
+      incrementalRepaint(changed: Set<object>): string {
+          if (changed.size === 0) return "";
         const width = this.getSidebarLayout().mainWidth;
         const rows = this.visibleScrollableRows;
         const start = this.visibleRootStart;
@@ -656,7 +656,7 @@ export class RenderEngine {
             const rEnd = Math.min(rows, rStart + range.lineCount);
             for (let r = rStart; r < rEnd; r++) affectedRows.add(r);
         }
-        if (affectedRows.size === 0) return;
+          if (affectedRows.size === 0) return "";
 
         const hasSelection = this.selectionManager.area !== null;
         let buf = disableAutoWrap();
@@ -676,10 +676,10 @@ export class RenderEngine {
                 ? content + "\x1b[0m"
                 : content + "\x1b[0m" + " ".repeat(width - vis);
         }
-        buf += this.getMouseReportingGuard();
-        buf += enableAutoWrap();
-        this.originalWrite(buf);
-    }
+          buf += this.getMouseReportingGuard();
+          buf += enableAutoWrap();
+          return buf;
+      }
 
     /**
      * Single entry point for the compositor's render loop.  Called by the
@@ -699,27 +699,25 @@ export class RenderEngine {
         this.refreshRootWindow(width);
 
         const changed = this.getAndClearChangedComponents();
-        if (changed.size > 0 && this.estimateAffectedLines(changed) <= 10) {
-            this.incrementalRepaint(changed);
-            // Cluster + sidebar may have changed (editor grew/shrunk) even
-            // if root changes were small.  Always repaint them to keep the
-            // editor area in sync with the current scrollable root height.
-            // write() invalidated renderPassCluster, so getCluster() fetches
-            // fresh editor content here.
-            this.renderPassCluster = null;
-            const cluster = this.getCluster(width, rawRows);
-            const clusterAndSidebar =
-                buildFixedClusterPaint(
-                    this.decorateCluster(cluster),
-                    rawRows,
-                    width,
-                    this.getShowHardwareCursor(),
-                ) +
-                this.buildSidebarPaint() +
-                this.getMouseReportingGuard();
-            this.originalWrite(clusterAndSidebar);
-            return;
-        }
+          if (changed.size > 0 && this.estimateAffectedLines(changed) <= 10) {
+              // Merge root changes + cluster + sidebar into a single write
+              // so the sidebar area is never displayed with stale content
+              // between separate writes.
+              this.renderPassCluster = null;
+              const cluster = this.getCluster(width, rawRows);
+              const fullBuffer =
+                  this.incrementalRepaint(changed) +
+                  buildFixedClusterPaint(
+                      this.decorateCluster(cluster),
+                      rawRows,
+                      width,
+                      this.getShowHardwareCursor(),
+                  ) +
+                  this.buildSidebarPaint() +
+                  this.getMouseReportingGuard();
+              this.originalWrite(fullBuffer);
+              return;
+          }
 
         // Full paint from the rootLines that refreshRootWindow just produced.
         this.renderPassCluster = null;

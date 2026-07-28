@@ -196,7 +196,20 @@ export class TerminalSplitCompositor {
         };
         addOurInputListener();
 
-        this.terminal.write = (data: string) => this.write(data);
+          this.terminal.write = (data: string) => this.write(data);
+
+          // Patch requestRender to invalidate the cluster cache before
+          // scheduling a render.  Extensions may update components in the
+          // cluster area (above/below widgets, footer) without triggering
+          // root-child cache misses; the cluster cache invalidation ensures
+          // the next renderFrame()→refreshRootWindow() re-renders the cluster
+          // with fresh content rather than returning the cached copy for the
+          // scrollableRows calculation.
+          const originalRequestRender = this.tui.requestRender.bind(this.tui);
+          this.tui.requestRender = (force?: boolean) => {
+              this.renderEngine.invalidateClusterCache();
+              originalRequestRender(force);
+          };
 
         // Window resize: force a repaint when the terminal dimensions change.
         if (typeof process !== "undefined" && typeof process.on === "function") {
