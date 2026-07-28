@@ -440,43 +440,60 @@ export class TerminalSplitCompositor {
 
     // ── Private: input ────────────────────────────────────────
 
-    private handleInput(
-        data: string,
-    ): { consume?: boolean; data?: string } | undefined {
-        if (this.disposed || this.renderEngine.hasVisibleOverlay())
-            return undefined;
+      private handleInput(
+          data: string,
+      ): { consume?: boolean; data?: string } | undefined {
+          if (this.disposed || this.renderEngine.hasVisibleOverlay())
+              return undefined;
 
-        const mouseResult = this.mouseScroll
-            ? parseSgrMousePackets(data)
-            : null;
-        if (mouseResult && mouseResult.packets.length > 0) {
-            logDebug(
-                "handleInput-mouse: packets=",
-                mouseResult.packets.length,
-                "renderPassActive=",
-                this.renderPassActive,
-                "ranges=",
-                this.renderEngine.currentRootComponentLineRanges.length,
-                "visibleRows=",
-                this.renderEngine.currentVisibleScrollableRows,
-            );
-            // Mouse wheel events often arrive in bursts from a single
-            // physical scroll gesture. First pass: classify packets and
-            // accumulate wheel deltas; dispatch non-wheel packets after any
-            // required lazy refresh so clicks operate on fresh ranges.
-            let wheelDelta = 0;
-            let hasPressOrRelease = false;
-            const base = (code: number) => mouseBaseButton(code);
-            for (const packet of mouseResult.packets) {
-                const delta = mouseScrollDelta(packet);
-                if (delta !== 0) {
-                    wheelDelta += delta;
-                    continue;
-                }
-                if (isMouseRelease(packet) || !isMouseMotion(packet)) {
-                    hasPressOrRelease = true;
-                }
-            }
+          // Invalidate the cluster cache before any input processing so the
+          // next renderFrame() → refreshRootWindow() → getCluster() fetches
+          // fresh editor state for the scrollableRows calculation.  Without
+          // this, refreshRootWindow sees a cache hit (generation unchanged)
+          // and computes scrollableRows from stale cluster data, causing a
+          // one-frame mismatch between the scroll region and the actual
+          // cluster size that manifests as visible flickering.
+          this.renderEngine.invalidateClusterCache();
+
+          const mouseResult = this.mouseScroll
+              ? parseSgrMousePackets(data)
+              : null;
+          if (mouseResult && mouseResult.packets.length > 0) {
+              logDebug(
+                  "handleInput-mouse: packets=",
+                  mouseResult.packets.length,
+                  "renderPassActive=",
+                  this.renderPassActive,
+                  "ranges=",
+                  this.renderEngine.currentRootComponentLineRanges.length,
+                  "visibleRows=",
+                  this.renderEngine.currentVisibleScrollableRows,
+              );
+              // Mouse wheel events often arrive in bursts from a single
+              // physical scroll gesture. First pass: classify packets and
+              // accumulate wheel deltas; dispatch non-wheel packets after any
+              // required lazy refresh so clicks operate on fresh ranges.
+              let wheelDelta = 0;
+              let hasPressOrRelease = false;
+              const base = (code: number) => mouseBaseButton(code);
+              for (const packet of mouseResult.packets) {
+                  const delta = mouseScrollDelta(packet);
+                  if (delta !== 0) {
+                      wheelDelta += delta;
+                      continue;
+                  }
+                  if (isMouseRelease(packet) || !isMouseMotion(packet)) {
+                      hasPressOrRelease = true;
+                  }
+              }
+
+              // Invalidate the cluster cache for press/release and scroll
+              // events that change editor state.  Pure motion (drag without
+              // buttons) skips invalidation to avoid re-rendering the
+              // cluster on every mouse move frame.
+              if (wheelDelta !== 0 || hasPressOrRelease) {
+                  this.renderEngine.invalidateClusterCache();
+              }
 
             // Press/release interactions must operate on the current viewport,
             // so flush any pending wheel scroll before refreshing hit-testing.
@@ -559,13 +576,20 @@ export class TerminalSplitCompositor {
             return { data: data.slice(mouseResult.consumed) };
         }
 
-        if (isRootSubmitInput(data)) {
-            this.jumpToRootBottom();
-            return undefined;
-        }
+          // For keyboard input (not mouse), the editor state will change
+          // during focusedComponent.handleInput().  Invalidate the cluster
+          // cache so refreshRootWindow sees fresh editor content for the
+          // scrollableRows calculation, avoiding a one-frame flicker from
+          // stale cluster data.
+          this.renderEngine.invalidateClusterCache();
 
-        const keyboardDelta = parseKeyboardScrollDelta(data);
-        if (keyboardDelta === 0) return undefined;
+          if (isRootSubmitInput(data)) {
+              this.jumpToRootBottom();
+              return undefined;
+          }
+
+          const keyboardDelta = parseKeyboardScrollDelta(data);
+          if (keyboardDelta === 0) return undefined;
 
         this.scrollCoalescer.schedule(keyboardDelta);
         return { consume: true };
