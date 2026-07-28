@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Container, type Component } from "@earendil-works/pi-tui";
 import {
     getSidebarRegistry,
-    renderSidebarPanels,
+    getSidebarContainer,
     resetSidebarRegistry,
     setSidebarRequestRender,
 } from "../src/app/sidebar-registry";
@@ -10,53 +11,80 @@ afterEach(() => {
     resetSidebarRegistry();
 });
 
+function component(lines: string[]): Component {
+    return {
+        render: () => lines,
+        invalidate: vi.fn(),
+    };
+}
+
 describe("sidebar registry", () => {
-    it("orders contributor panels and requests a repaint on changes", () => {
+    it("adds components to the extension container in order", () => {
+        const registry = getSidebarRegistry();
+        registry.add(component(["later"]), { order: 10 });
+        registry.add(component(["first"]), { order: 0 });
+
+        const rendered = getSidebarContainer().render(20);
+        expect(rendered).toEqual(["first", "later"]);
+    });
+
+    it("requests a repaint on add and dispose", () => {
         const requestRender = vi.fn();
         setSidebarRequestRender(requestRender);
         const registry = getSidebarRegistry();
-        const disposeLater = registry.register({
-            id: "later",
-            order: 10,
-            render: () => ["later"],
-        });
-        registry.register({
-            id: "first",
-            order: 0,
-            render: () => ["first"],
-        });
 
-        expect(renderSidebarPanels(20, 10)).toEqual(["first", "later"]);
+        const dispose = registry.add(component(["a"]));
+        expect(requestRender).toHaveBeenCalledTimes(1);
+
+        dispose();
         expect(requestRender).toHaveBeenCalledTimes(2);
-
-        disposeLater();
-        expect(renderSidebarPanels(20, 10)).toEqual(["first"]);
-        expect(requestRender).toHaveBeenCalledTimes(3);
     });
 
-    it("isolates a broken or hidden contributor", () => {
+    it("filters hidden contributors and includes visible ones", () => {
         const registry = getSidebarRegistry();
-        registry.register({
-            id: "hidden",
+        registry.add(component(["not shown"]), {
             visible: () => false,
-            render: () => ["not shown"],
         });
-        registry.register({
-            id: "broken",
-            render: () => {
-                throw new Error("broken panel");
-            },
-        });
-        registry.register({ id: "good", render: () => ["shown"] });
+        registry.add(component(["shown"]), { id: "good" });
 
-        expect(renderSidebarPanels(20, 10)).toEqual(["shown"]);
+        const rendered = getSidebarContainer().render(20);
+        expect(rendered).toEqual(["shown"]);
     });
 
-    it("rejects duplicate panel ids", () => {
+    it("rejects duplicate ids", () => {
         const registry = getSidebarRegistry();
-        registry.register({ id: "same", render: () => [] });
-        expect(() => registry.register({ id: "same", render: () => [] })).toThrow(
-            "Sidebar panel already registered: same",
+        registry.add(component([]), { id: "same" });
+        expect(() => registry.add(component([]), { id: "same" })).toThrow(
+            "Sidebar component already registered: same",
         );
+    });
+
+    it("invalidate calls through to all registered components", () => {
+        const registry = getSidebarRegistry();
+        const c1 = component(["a"]);
+        const c2 = component(["b"]);
+        registry.add(c1, { id: "p1" });
+        registry.add(c2, { id: "p2" });
+
+        registry.invalidate();
+
+        expect(c1.invalidate).toHaveBeenCalledOnce();
+        expect(c2.invalidate).toHaveBeenCalledOnce();
+    });
+
+    it("invalidate isolates a broken component", () => {
+        const registry = getSidebarRegistry();
+        const c1 = component(["a"]);
+        const c2: Component = {
+            render: () => [],
+            invalidate: () => {
+                throw new Error("bad");
+            },
+        };
+        registry.add(c1, { id: "p1" });
+        registry.add(c2, { id: "p2" });
+
+        expect(() => registry.invalidate()).not.toThrow();
+        expect(c1.invalidate).toHaveBeenCalledOnce();
     });
 });

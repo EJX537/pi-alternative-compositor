@@ -779,12 +779,6 @@ export class RenderEngine {
             this.tui.collectKittyImageIds(highlightedRootLines);
     }
 
-    /**
-     * Paint a simple intermediate frame (e.g. "Loading...") immediately after
-     * entering the alternate screen, before the first real paintFullFrame.
-     * Gives the user immediate visual feedback instead of a blank screen
-     * during the synchronous render cache warm-up.
-     */
     paintIntermediateFrame(message: string): void {
         const rows = this.getRawRows();
         const layout = this.getSidebarLayout();
@@ -822,7 +816,13 @@ export class RenderEngine {
 
         const sidebarLines =
             this.sidebar && layout.sidebarWidth > 0
-                ? this.sidebar.render(layout.sidebarWidth, rawRows)
+                ? (() => {
+                    try {
+                        return this.sidebar!.component.render(layout.sidebarWidth);
+                    } catch {
+                        return [];
+                    }
+                })()
                 : [];
         const sidebarStart = Math.max(0, mainLines.length - rawRows);
         return mainLines.map((mainLine, index) =>
@@ -979,7 +979,12 @@ export class RenderEngine {
         if (!this.sidebar || layout.sidebarWidth === 0) return "";
 
         const rows = this.getRawRows();
-        const lines = this.sidebar.render(layout.sidebarWidth, rows);
+        let lines: string[];
+        try {
+            lines = this.sidebar.component.render(layout.sidebarWidth);
+        } catch {
+            lines = [];
+        }
         let buffer = "";
         for (let row = 0; row < rows; row++) {
             buffer +=

@@ -613,7 +613,10 @@ describe("TerminalSplitCompositor installation", () => {
         };
         tui.children = [{ render: () => ["plain"] }];
         tui.render = () => ["plain"];
-        options.sidebar = { breakpoint: "sm", render: () => ["side"] };
+        options.sidebar = {
+            breakpoint: "sm",
+            component: { render: () => ["side"], invalidate: () => {} },
+        };
         const compositor = new TerminalSplitCompositor(options);
         const internal = compositor as unknown as {
             handleMousePacket(packet: { code: number; col: number; row: number; final: "M" | "m" }): void;
@@ -751,7 +754,7 @@ describe("TerminalSplitCompositor installation", () => {
         options.sidebar = {
             breakpoint: "sm",
             visible: () => visible,
-            render: () => ["sidebar"],
+            component: { render: () => ["sidebar"], invalidate: () => {} },
         };
         const compositor = new TerminalSplitCompositor(options);
 
@@ -779,7 +782,7 @@ describe("TerminalSplitCompositor installation", () => {
         options.renderCluster = () => ({ lines: ["editor"], cursor: null });
         options.sidebar = {
             breakpoint: "sm",
-            render: () => ["sidebar"],
+            component: { render: () => ["sidebar"], invalidate: () => {} },
         };
         const compositor = new TerminalSplitCompositor(options);
 
