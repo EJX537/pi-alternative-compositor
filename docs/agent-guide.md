@@ -35,7 +35,7 @@ This document is for pi agents tasked with debugging, extending, or maintaining 
                     │   │ RenderEngine                   │  │
                     │   │  - renderFrame() ← entry point │  │
                     │   │  - refreshRootWindow()         │  │
-                    │   │  - incrementalRepaint()        │  │
+                    │   │  - composeFrame() + diffRows() │  │
                     │   │  - paintFullFrame()            │  │
                     │   │  - repaintScrollableViewport() │  │
                     │   └────────────────────────────────┘  │
@@ -161,7 +161,7 @@ All cluster children (editor, above/below widgets, footer) have their `render()`
 
 ## Render pipeline
 
-### Entry point: `renderFrame()` → `refreshRootWindow()` → detect changes → paint
+### Entry point: `renderFrame()` → `refreshRootWindow()` → compose frame → A/B diff → paint
 
 ```
 requestRender()
@@ -169,28 +169,55 @@ requestRender()
        └→ renderFrame()
             ├─ 1. refreshRootWindow(width)
             │      ├─ getCluster(width, rows) → scrollableRows = rows - cluster.lines
-            │      ├─ childRenderCache.render(rootChildren, width) → rootLines + changedComponents
+            │      ├─ childRenderCache.render(rootChildren, width) → rootLines
             │      ├─ updateRootComponentLineRanges() → hit-testing data
             │      └─ updateVisibleRootWindow() → visibleRootLines
             │
-            ├─ 2. getAndClearChangedComponents()
+            ├─ 2. composeFrame(width, rows, cluster, highlightedRootLines)
+            │      → full-screen rows, sanitized + padded to terminal width
+            │        (main columns + sidebar columns), sidebar rendered once
             │
-            ├─ 3. changed.size > 0 && estimateAffectedLines ≤ 10?
-            │      YES → incrementalRepaint(changed) + cluster + sidebar (one write)
-            │      NO  → full paint: scroll region + full root + cluster + sidebar
+            ├─ 3. forceFullPaint?  (no previous frame | screenFrameDirty |
+            │      width/height changed)
+            │      YES → synchronized full paint (scroll region + all rows +
+            │             cluster + sidebar), then recordScreenFrame
             │
-            └─ 4. originalWrite(buffer)
+            ├─ 4. diffRows(prevFrame.rows, rows)
+            │      ├─ 0 changed → reposition cluster cursor, nothing else
+            │      ├─ < half the screen → write only changed rows
+            │      │    (moveCursor(row,1) + composed row) + cursor paint
+            │      └─ ≥ half the screen → synchronized full paint
+            │
+            └─ 5. originalWrite(buffer)
 ```
 
-### Incremental vs full paint
+### A/B diff vs full paint
 
 | Condition | Path | Writes |
 |-----------|------|--------|
-| No root changes (`changed.size === 0`) | Full paint | All scrollable rows + cluster + sidebar |
-| Small changed area (≤10 screen rows) | Incremental | Only affected rows + cluster + sidebar |
-| Large changed area (>10 rows) | Full paint | All scrollable rows + cluster + sidebar |
+| First frame / resize / `screenFrameDirty` (passthrough write, overlay transition, intermediate frame) | Full paint | All scrollable rows + cluster + sidebar |
+| Few changed rows (< half the screen) | A/B diff | Only rows whose composed content differs + cluster cursor |
+| Many changed rows (≥ half the screen) | Full paint | All scrollable rows + cluster + sidebar |
+| No changed rows | Cursor only | Cluster cursor positioning (+ mouse guard) |
 
-The incremental path avoids `beginSynchronizedOutput`/`endSynchronizedOutput` and scroll-region setup. It just positions to each changed row and writes the new content, then paints cluster+sidebar. This makes spinner animations smooth (no ~500 bytes of escape overhead per 80ms tick).
+Change detection is **exact**: the previous frame's composed rows are compared
+string-for-string against the new frame, so a component whose signature
+changed but whose output is byte-identical costs nothing, and in-place
+content mutations that slip past the signature cache are still caught.  The
+signature cache remains purely a render optimization (skip re-rendering
+unchanged components); it no longer drives the paint decision.
+
+The diff path avoids `beginSynchronizedOutput`/`endSynchronizedOutput` and
+scroll-region setup — just `moveCursor` + row content.  This makes spinner
+animations smooth (no ~500 bytes of escape overhead per 80ms tick).
+
+`screenFrameDirty` is set whenever the compositor writes outside the frame
+model (editor echo passthrough in `write()`, overlay transitions, `paintIntermediateFrame`).  The next `renderFrame()` then does a full paint instead of
+risking a stale diff.
+
+Scroll repaints (`repaintScrollableViewport`) update the A/B frame in place
+via `recordPaintedRows()` so a subsequent diff does not see the whole
+viewport as changed.
 
 ### The `refreshRootWindow()` → `getCluster()` subtlety
 

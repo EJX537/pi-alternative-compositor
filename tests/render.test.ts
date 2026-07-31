@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildFixedClusterPaint } from "../src/compositor/frame";
+import {
+    buildClusterCursorPaint,
+    buildFixedClusterPaint,
+} from "../src/compositor/frame";
 import { resolveSidebarLayout } from "../src/compositor/layout";
 import type { FixedEditorClusterRender } from "../src/compositor/cluster";
 
@@ -139,5 +142,58 @@ describe("buildFixedClusterPaint", () => {
         for (const line of lines) {
             expect(result).toContain(line);
         }
+    });
+});
+
+describe("buildClusterCursorPaint", () => {
+    it("positions the cursor and shows it when cursor is set", () => {
+        const cluster: FixedEditorClusterRender = {
+            lines: ["line"],
+            cursor: { row: 0, col: 2 },
+        };
+        const result = buildClusterCursorPaint(cluster, 24, true);
+
+        expect(result).toBe("\x1b[24;3H\x1b[?25h");
+    });
+
+    it("hides the cursor when no cursor is set and showHardwareCursor is true", () => {
+        const cluster: FixedEditorClusterRender = {
+            lines: ["line"],
+            cursor: null,
+        };
+        const result = buildClusterCursorPaint(cluster, 24, true);
+
+        expect(result).toBe("\x1b[?25l");
+    });
+
+    it("emits nothing when showHardwareCursor is false", () => {
+        const cluster: FixedEditorClusterRender = {
+            lines: ["line"],
+            cursor: { row: 0, col: 0 },
+        };
+        const result = buildClusterCursorPaint(cluster, 24, false);
+
+        expect(result).toBe("");
+    });
+
+    it("emits nothing for an empty cluster", () => {
+        const cluster: FixedEditorClusterRender = {
+            lines: [],
+            cursor: null,
+        };
+        const result = buildClusterCursorPaint(cluster, 24, true);
+
+        expect(result).toBe("");
+    });
+
+    it("matches the cursor tail of buildFixedClusterPaint", () => {
+        const cluster: FixedEditorClusterRender = {
+            lines: ["line"],
+            cursor: { row: 0, col: 1 },
+        };
+        const full = buildFixedClusterPaint(cluster, 24, 80, true);
+        const cursorOnly = buildClusterCursorPaint(cluster, 24, true);
+
+        expect(full.endsWith(cursorOnly)).toBe(true);
     });
 });

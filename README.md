@@ -1,6 +1,6 @@
 # pi-alternative-compositor
 
-> **⚠️ EXPERIMENTAL — AI-generated, hooks pi's private internals.** This extension replaces pi's entire TUI rendering pipeline by monkey-patching `tui.render`, `tui.doRender`, `terminal.write`, `terminal.rows`/`columns`, and `compositeLineAt`. It **will** break on pi upgrades. Not intended for casual use — clone it, read it, understand it.
+> **⚠️ EXPERIMENTAL — AI-generated, hooks pi's private internals.** This extension replaces pi's entire TUI rendering pipeline by monkey-patching `tui.render`, `tui.doRender`, `terminal.write`, `terminal.rows`/`columns`, and `compositeLineAt`. It **may** break on pi upgrades. Not intended for casual use — clone it, read it, understand it.
 
 A scrollable chat viewport compositor for [pi coding agent](https://pi.dev) that keeps the editor fixed at the bottom while the chat history scrolls independently, with click-to-collapse and an extensible sidebar.
 
@@ -28,10 +28,10 @@ Three subsystems, layered:
 
 ### 1. Terminal split compositor (`src/terminal/`)
 Replaces the rendering pipeline. Owns:
-- **`RenderEngine`** — `renderFrame()` (entry point from patched `tui.doRender`), incremental repaint for small changes, full paint for everything else, scroll region management
+- **`RenderEngine`** — `renderFrame()` (entry point from patched `tui.doRender`), A/B frame diffing (writes only screen rows that changed), full paint for first frame / resize / untracked writes, scroll region management
 - **`ChildRenderCache`** — per-root-child hash-signature caching to avoid re-rendering unchanged components on every frame. Signatures include recursive child hashes so collapsing a nested tool invalidates the parent.
 - **`TerminalSplitCompositor`** — lifecycle (`install`/`dispose`), input routing (mouse/keyboard/scroll), `terminal.write` interception
-- **Render pipeline**: `requestRender` → `doRender` (patched) → `renderFrame` → `refreshRootWindow` (render root children, detect changes) → incremental paint (≤10 changed lines) or full paint (scroll region + root + cluster + sidebar)
+- **Render pipeline**: `requestRender` → `doRender` (patched) → `renderFrame` → `refreshRootWindow` (render root children via cache) → compose full screen frame (root + cluster + sidebar) → A/B diff against previous frame → write only changed rows; large diffs and dirty frames (passthrough writes, overlay transitions, resize) fall back to a synchronized full paint
 
 ### 2. Collapse controller (`src/collapse/`)
 Per-cell collapse/expand that survives streaming:
