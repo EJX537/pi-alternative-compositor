@@ -356,9 +356,9 @@ The editor may contain a `CURSOR_MARKER` (`\x1b_pi:c\x07`). `extractCursor()` fi
 ### How it works
 
 1. On session start, `CollapseController` wires into pi's component tree via `setupExpansionInterceptor()`.
-2. For each collapsible component (Tool, Assistant with ThinkingMarkdown), it calls `setupCellOverride()`.
-3. `setupCellOverride()` patches `setExpanded()` (for Tools) or `setHideThinkingBlock()` (for Assistants) to check for an override before delegating to pi.
-4. Overrides are stored in a `Map<string, boolean>` keyed by `toolCallId` or `message.id`.
+2. For each collapsible component (Tool, Assistant with ThinkingMarkdown, CompactionSummary cell), it calls `setupCellOverride()`.
+3. `setupCellOverride()` patches `setExpanded()` (for Tools and compaction cells) or `setHideThinkingBlock()` (for Assistants) to check for an override before delegating to pi.
+4. Overrides are stored in a `Map<string, boolean>` keyed by `toolCallId`, `message.id`, or the compaction message `timestamp`.
 5. When pi's global collapse keyboard shortcut fires, pi calls `setExpanded(false)` on ALL tool cells. With the patch, each cell checks its override: if an override exists, the pi call is ignored and our preference wins.
 6. Toggle from mouse click works via `CollapseController.toggle(component, clickLine)` in `MouseHandler.handleRelease()`.
 

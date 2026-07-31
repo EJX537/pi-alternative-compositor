@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { CollapseController } from "../src/collapse/collapse-controller.js";
-import { isAssistantComponent, isToolComponent } from "../src/collapse/types.js";
+import {
+    isAssistantComponent,
+    isCollapsibleComponent,
+    isCompactionComponent,
+    isToolComponent,
+} from "../src/collapse/types.js";
 import { TerminalSplitCompositor } from "../src/terminal/controller";
 import type { TerminalSplitCompositorOptions } from "../src/terminal/types";
 
@@ -45,6 +50,23 @@ function createToolComponent(expanded = true) {
     };
 }
 
+function createCompactionComponent(
+    overrides: { role?: string; timestamp?: number; expanded?: boolean } = {},
+) {
+    return {
+        message: {
+            role: overrides.role ?? "compactionSummary",
+            summary: "Session history was compacted",
+            tokensBefore: 12000,
+            timestamp: overrides.timestamp ?? 1234567890,
+        },
+        expanded: overrides.expanded ?? false,
+        setExpanded(value: boolean) {
+            this.expanded = value;
+        },
+    };
+}
+
 // ── Type guard tests ──────────────────────────────────────────
 
 describe("isAssistantComponent", () => {
@@ -66,6 +88,32 @@ describe("isAssistantComponent", () => {
     it("recognizes an assistant component with responseId", () => {
         const { component } = createAssistantComponent({ responseId: "resp-1" });
         expect(isAssistantComponent(component)).toBe(true);
+    });
+});
+
+describe("isCompactionComponent", () => {
+    it("recognizes a compaction cell", () => {
+        expect(isCompactionComponent(createCompactionComponent())).toBe(true);
+    });
+
+    it("rejects a component with the wrong message role", () => {
+        expect(
+            isCompactionComponent(createCompactionComponent({ role: "user" })),
+        ).toBe(false);
+    });
+
+    it("rejects a component missing setExpanded", () => {
+        const comp = createCompactionComponent() as {
+            setExpanded?: (value: boolean) => void;
+        };
+        delete comp.setExpanded;
+        expect(isCompactionComponent(comp)).toBe(false);
+    });
+
+    it("does not confuse a compaction cell with a tool, but treats it as collapsible", () => {
+        const comp = createCompactionComponent();
+        expect(isToolComponent(comp)).toBe(false);
+        expect(isCollapsibleComponent(comp)).toBe(true);
     });
 });
 
@@ -109,6 +157,54 @@ describe("CollapseController", () => {
         const tool = createToolComponent(true);
         collapse.toggle(tool, 0);
         expect(collapse.isCollapsed(tool)).toBe(true);
+    });
+
+    it("toggles a collapsed compaction cell to expanded", () => {
+        const collapse = new CollapseController();
+        const comp = createCompactionComponent();
+        expect(collapse.toggle(comp, 0)).toBe(true);
+        expect(collapse.isCollapsed(comp)).toBe(false);
+        expect(comp.expanded).toBe(true);
+    });
+
+    it("toggles an expanded compaction cell back to collapsed", () => {
+        const collapse = new CollapseController();
+        const comp = createCompactionComponent({ expanded: true });
+        collapse.toggle(comp, 0);
+        expect(collapse.isCollapsed(comp)).toBe(true);
+        expect(comp.expanded).toBe(false);
+    });
+
+    it("compaction override survives pi's global setExpanded calls", () => {
+        const collapse = new CollapseController();
+        const comp = createCompactionComponent();
+        collapse.toggle(comp, 0);
+
+        // Simulate pi's global collapse toggle after our per-cell choice.
+        comp.setExpanded(false);
+        expect(collapse.isCollapsed(comp)).toBe(false);
+        expect(comp.expanded).toBe(true);
+    });
+
+    it("keeps compaction overrides per cell by timestamp", () => {
+        const collapse = new CollapseController();
+        const compA = createCompactionComponent({ timestamp: 111 });
+        const compB = createCompactionComponent({ timestamp: 222 });
+        collapse.toggle(compA, 0);
+        expect(collapse.isCollapsed(compA)).toBe(false);
+        // Untouched cell keeps its default (collapsed) state.
+        expect(collapse.isCollapsed(compB)).toBe(true);
+    });
+
+    it("records a compaction toggle for viewport anchoring", () => {
+        const collapse = new CollapseController();
+        const comp = createCompactionComponent();
+        collapse.toggle(comp, 17);
+        const t = collapse.consumeLastToggle();
+        expect(t).not.toBeNull();
+        expect(t!.component).toBe(comp);
+        expect(t!.collapsed).toBe(false);
+        expect(t!.startLine).toBe(17);
     });
 
     it("consumes and clears lastToggle", () => {

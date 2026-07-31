@@ -31,6 +31,26 @@ export type ToolComponent = ComponentLike & {
     render: (width: number) => string[];
 };
 
+/**
+ * Pi's `CompactionSummaryMessageComponent` (dist/modes/interactive/
+ * components/compaction-summary-message.js).  Rendered when a session is
+ * compacted: a Box with `[compaction]` label, collapsed by default showing
+ * "Compacted from N tokens (key to expand)", expanded showing the summary
+ * markdown.  Has `setExpanded` like a tool cell but no toolCallId, and no
+ * thinking block.
+ */
+export type CompactionComponent = ComponentLike & {
+    message: {
+        role: "compactionSummary";
+        summary?: string;
+        tokensBefore?: number;
+        timestamp?: number;
+    };
+    setExpanded: (expanded: boolean) => void;
+    expanded?: boolean;
+    render: (width: number) => string[];
+};
+
 export function isAssistantComponent(
     component: unknown,
 ): component is AssistantComponent {
@@ -54,6 +74,20 @@ export function isToolComponent(
         typeof candidate.setExpanded === "function" &&
         typeof candidate.toolCallId === "string" &&
         typeof candidate.toolName === "string"
+    );
+}
+
+export function isCompactionComponent(
+    component: unknown,
+): component is CompactionComponent {
+    if (!component || typeof component !== "object") return false;
+    const candidate = component as ComponentLike;
+    const message = (candidate as { message?: unknown }).message;
+    return (
+        typeof candidate.setExpanded === "function" &&
+        typeof message === "object" &&
+        message !== null &&
+        (message as { role?: unknown }).role === "compactionSummary"
     );
 }
 
@@ -113,5 +147,9 @@ export function findThinkingChild(
 }
 
 export function isCollapsibleComponent(component: unknown): boolean {
-    return isToolComponent(component) || isAssistantComponent(component);
+    return (
+        isToolComponent(component) ||
+        isAssistantComponent(component) ||
+        isCompactionComponent(component)
+    );
 }

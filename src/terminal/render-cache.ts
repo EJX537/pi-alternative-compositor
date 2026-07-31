@@ -1,6 +1,7 @@
 import { CollapseController } from "../collapse/collapse-controller.js";
 import {
     isAssistantComponent,
+    isCompactionComponent,
     isToolComponent,
 } from "../collapse/types.js";
 import type { ComponentRangeMapper } from "./range-mapper.js";
@@ -90,12 +91,17 @@ function signatureForComponent(
         h = hashString(h, component.toolName);
         h = hashString(h, String(collapseState.isCollapsed(component)));
         h = hashString(h, String(contentLength(component)));
-    } else if (isAssistantComponent(component)) {
-        h = hashString(h, "assistant");
-        h = hashString(h, String(stableObjectId(component.lastMessage)));
-        h = hashString(h, String(collapseState.isCollapsed(component)));
-        h = hashString(h, String(contentLength(component.lastMessage)));
-    } else {
+      } else if (isAssistantComponent(component)) {
+          h = hashString(h, "assistant");
+          h = hashString(h, String(stableObjectId(component.lastMessage)));
+          h = hashString(h, String(collapseState.isCollapsed(component)));
+          h = hashString(h, String(contentLength(component.lastMessage)));
+      } else if (isCompactionComponent(component)) {
+          h = hashString(h, "compaction");
+          h = hashString(h, String(stableObjectId(component)));
+          h = hashString(h, String(collapseState.isCollapsed(component)));
+          h = hashString(h, String(contentLength(component)));
+      } else {
         // Include `text` (Text/Loader components) or `content`
         // (generic components) so content changes bust the render
         // cache.  Without this, animated components like the

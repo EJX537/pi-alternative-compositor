@@ -27,9 +27,11 @@
 import {
     isToolComponent,
     isAssistantComponent,
+    isCompactionComponent,
     isCollapsibleComponent as isCompCollapsible,
     type ToolComponent,
     type AssistantComponent,
+    type CompactionComponent,
 } from "./types.js";
 
 // Stable object identity for fallback assistant keying.
@@ -56,6 +58,7 @@ export class CollapseController {
      */
     private toolOverrides = new Map<string, boolean>();
     private assistantOverrides = new Map<string | object, boolean>();
+    private compactionOverrides = new Map<string, boolean>();
 
     /** Components whose setExpanded/setHideThinkingBlock is patched. */
     private patched = new WeakSet<object>();
@@ -80,6 +83,19 @@ export class CollapseController {
     private assistantKey(comp: AssistantComponent): string | object {
         const m = comp.lastMessage;
         return m.responseId ?? m.id ?? String(stableObjectId(m));
+    }
+
+    /**
+     * Compaction cells are keyed by the message timestamp (unique per
+     * compaction event, stable across pi rebuilds), falling back to stable
+     * object identity.
+     */
+    private compactionKey(comp: CompactionComponent): string {
+        const timestamp = comp.message.timestamp;
+        if (timestamp !== undefined && timestamp !== null) {
+            return `compaction:${String(timestamp)}`;
+        }
+        return `compaction:obj:${stableObjectId(comp)}`;
     }
 
     // ── Toggle API ───────────────────────────────────────────
@@ -117,6 +133,38 @@ export class CollapseController {
     }
 
     /**
+     * Toggle a compaction cell's collapsed state.
+     * Same mechanism as tools: patches `setExpanded` and stores a per-cell
+     * override so the cell survives pi's global `app.tools.expand` toggle.
+     */
+    toggleCompaction(comp: unknown, clickLine: number): boolean {
+        if (!isCompactionComponent(comp)) return false;
+
+        const key = this.compactionKey(comp);
+        const current = this.compactionOverrides.get(key);
+        const isCurrentlyCollapsed =
+            current !== undefined
+                ? current
+                : !(comp.expanded ?? true);
+        const nextCollapsed = !isCurrentlyCollapsed;
+
+        if (!this.patched.has(comp)) {
+            this.patchExpandedComponent(comp, this.compactionOverrides, key);
+        }
+
+        // Call pi's native setExpanded FIRST (bypassing the patch), then set
+        // our override so pi's later calls are ignored.
+        this.origSetExpandedFor(comp, !nextCollapsed);
+        this.compactionOverrides.set(key, nextCollapsed);
+        this._lastToggle = {
+            component: comp,
+            collapsed: nextCollapsed,
+            startLine: clickLine,
+        };
+        return true;
+    }
+
+    /**
      * Toggle an assistant component's thinking-block visibility.
      * Calls `setHideThinkingBlock()` so pi handles rendering.
      */
@@ -147,7 +195,8 @@ export class CollapseController {
     toggle(comp: unknown, clickLine: number): boolean {
         return (
             this.toggleTool(comp, clickLine) ||
-            this.toggleAssistant(comp, clickLine)
+            this.toggleAssistant(comp, clickLine) ||
+            this.toggleCompaction(comp, clickLine)
         );
     }
 
@@ -167,6 +216,11 @@ export class CollapseController {
             const key = this.assistantKey(component);
             const o = this.assistantOverrides.get(key);
             return o !== undefined ? o : (component.hideThinkingBlock ?? false);
+        }
+        if (isCompactionComponent(component)) {
+            const key = this.compactionKey(component);
+            const o = this.compactionOverrides.get(key);
+            return o !== undefined ? o : !(component.expanded ?? true);
         }
         return null;
     }
@@ -205,28 +259,49 @@ export class CollapseController {
      *   but our patch sees the override and ignores the call → our
      *   per-cell choice sticks.
      */
-    /** Saved original setExpanded for each tool, used by toggleTool. */
-    private origSetExpandedMap = new WeakMap<ToolComponent, (v: boolean) => void>();
+    /** Saved original setExpanded for each component, used by the toggle methods. */
+    private origSetExpandedMap = new WeakMap<
+        { setExpanded: (v: boolean) => void },
+        (v: boolean) => void
+    >();
 
-    private origSetExpandedFor(tool: ToolComponent, value: boolean): void {
-        const fn = this.origSetExpandedMap.get(tool);
+    private origSetExpandedFor(
+        comp: { setExpanded: (v: boolean) => void },
+        value: boolean,
+    ): void {
+        const fn = this.origSetExpandedMap.get(comp);
         if (fn) fn(value);
     }
 
-    private patchTool(tool: ToolComponent): void {
-        if (!this.patched.has(tool)) {
-            this.patched.add(tool);
+    /**
+     * Patch a component's `setExpanded` so that once we hold a per-cell
+     * override for it, pi's calls to `setExpanded` (global expand/collapse
+     * toggle, reconciliation) are ignored.  Without an override the call
+     * passes through to pi.
+     */
+    private patchExpandedComponent(
+        comp: { setExpanded: (v: boolean) => void },
+        overrides: Map<string, boolean>,
+        key: string,
+    ): void {
+        if (!this.patched.has(comp)) {
+            this.patched.add(comp);
         }
-        const origSetExpanded = tool.setExpanded.bind(tool);
-        this.origSetExpandedMap.set(tool, origSetExpanded);
-        const overrides = this.toolOverrides;
-        const key = this.toolKey(tool);
-
-        tool.setExpanded = function (value: boolean) {
+        const origSetExpanded = comp.setExpanded.bind(comp);
+        this.origSetExpandedMap.set(comp, origSetExpanded);
+        comp.setExpanded = function (value: boolean) {
             if (!overrides.has(key)) {
                 origSetExpanded(value);
             }
         };
+    }
+
+    private patchTool(tool: ToolComponent): void {
+        this.patchExpandedComponent(
+            tool,
+            this.toolOverrides,
+            this.toolKey(tool),
+        );
     }
 
     /**
