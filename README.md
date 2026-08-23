@@ -4,6 +4,18 @@
 
 A scrollable chat viewport compositor for [pi coding agent](https://pi.dev) that keeps the editor fixed at the bottom while the chat history scrolls independently, with click-to-collapse and an extensible sidebar.
 
+## TUI mode requirement
+
+**Use this extension with pi's regular TUI mode only.** Do not enable pi's experimental fullscreen TUI (`--tui-mode fullscreen` or the runtime `/settings` toggle) while this extension is loaded.
+
+Pi's native fullscreen (added in pi 0.84, `TuiAltScreen`) is incompatible with this compositor:
+
+- Both own the alternate screen — the compositor writes `\x1b[?1049h` and so does fullscreen, so the two fight over terminal state
+- The compositor's root-slicing assumption (`tui.children[0..clusterStartIndex)`) breaks because fullscreen renders through a layout tree (`setLayoutRoot`) instead of child iteration
+- Switching TUI modes mid-session destroys the TUI instance the compositor patched
+
+The extension is unsupported in fullscreen mode and may break rendering — keep `--tui-mode` at its default until pi's fullscreen is a stable release.
+
 ## Why this exists
 
 Pi's default TUI renders all children in one linear scroll — the editor, widgets, and footer move with the chat log. This compositor splits the screen into two regions:

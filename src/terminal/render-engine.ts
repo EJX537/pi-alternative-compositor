@@ -7,11 +7,14 @@ import {
     resetScrollRegion,
     moveCursor,
     clearToEndOfLine,
+    homeCursor,
+    eraseDisplay,
 } from "./escape.js";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import {
     sanitizeLine,
 } from "../compositor/text.js";
+import { logError } from "./debug-log.js";
 
 import { resolveSidebarLayout } from "../compositor/layout.js";
 import {
@@ -488,9 +491,73 @@ export class RenderEngine {
                     "root",
                 );
             });
+        } catch (err) {
+            // A throw here escapes into pi's uncaughtCrash path, which exits
+            // before the error is ever painted — the compositor's last frame
+            // stays on screen and the error is invisible. Log unconditionally
+            // and paint the error banner so the source is visible.
+            logError("render-root-error:", err);
+            this.paintErrorBanner(err);
+            return [];
         } finally {
             this.renderingScrollableRoot = false;
         }
+    }
+
+    /**
+     * Paint a full-screen error banner directly through originalWrite,
+     * bypassing the A/B frame pipeline.  Used when the render pipeline itself
+     * throws: pi's uncaughtCrash would otherwise exit(1) before the error is
+     * rendered, leaving the compositor's last frame on screen with no
+     * indication of what failed.  The banner is also logged to the debug log.
+     */
+    paintErrorBanner(err: unknown): void {
+        const rows = Math.max(3, this.getRawRows());
+        const cols = Math.max(10, this.getRawColumns());
+        const message =
+            err instanceof Error ? err.stack ?? err.message : String(err);
+        const bannerLines = [
+            "[pi-alternative-compositor] render error",
+            "",
+            ...message.split("\n"),
+            "",
+            "Check ~/.pi/agent/pi-alternative-compositor-debug.log for details.",
+        ];
+        const wrapped: string[] = [];
+        for (const line of bannerLines) {
+            const vis = visibleWidth(line);
+            if (vis >= cols) {
+                // Crude hard-wrap so a long stack trace line never pushes the
+                // banner off-screen; the log retains the untruncated text.
+                for (let i = 0; i < line.length; i += cols) {
+                    wrapped.push(line.slice(i, i + cols));
+                }
+            } else {
+                wrapped.push(line);
+            }
+        }
+        const usable = Math.max(1, rows - 1);
+        const shown = wrapped.slice(0, usable);
+        let buffer =
+            homeCursor() + eraseDisplay() + disableAutoWrap();
+        for (let row = 0; row < shown.length; row++) {
+            const line = sanitizeLine(shown[row] ?? "", cols);
+            buffer += line;
+            buffer += "\x1b[0m";
+            const vis = visibleWidth(line);
+            if (vis < cols) buffer += " ".repeat(cols - vis);
+            if (row < shown.length - 1) buffer += "\r\n";
+        }
+        buffer += enableAutoWrap() + moveCursor(1, 1);
+        try {
+            this.originalWrite(buffer);
+        } catch {
+            // The banner write itself must never throw.
+        }
+        // Keep the banner visible until the next successful render: mark the
+        // A/B frame dirty so renderFrame() falls back to a full paint.
+        this.screenFrameDirty = true;
+        this.screenFrame = null;
     }
 
     repaintScrollableViewport(

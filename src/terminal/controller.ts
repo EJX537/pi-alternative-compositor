@@ -27,7 +27,7 @@ import type {
     RootComponentLineRange,
     TerminalSplitCompositorOptions,
 } from "./types.js";
-import { logDebug } from "./debug-log.js";
+import { logDebug, logError } from "./debug-log.js";
 
 // ── TerminalSplitCompositor ──────────────────────────────────
 
@@ -258,6 +258,15 @@ export class TerminalSplitCompositor {
                         // with a single refreshRootWindow call.
                         this.renderEngine.renderFrame();
                     }
+                } catch (err) {
+                    // Never let a compositor render error escape to pi's
+                    // uncaughtCrash handler, which console.errors and then
+                    // process.exit(1)s BEFORE the error text is painted — the
+                    // compositor's last frame stays on screen and the error is
+                    // invisible. Log unconditionally and paint the error banner
+                    // so the source is visible on screen.
+                    logError("compositor-doRender-error:", err);
+                    this.renderEngine.paintErrorBanner(err);
                 } finally {
                     this.renderPassActive = false;
                     this.renderEngine.setRenderPassActive(false);
@@ -304,9 +313,9 @@ export class TerminalSplitCompositor {
             // first renderFrame() re-renders the cluster with the complete
             // child set.
             this.renderEngine.invalidateClusterCache();
-        } catch (err) {
-            logDebug("install-eager-refresh-error:", err);
-        }
+          } catch (err) {
+              logError("install-eager-refresh-error:", err);
+          }
 
         this.installed = true;
     }
@@ -560,9 +569,9 @@ export class TerminalSplitCompositor {
                             this.renderEngine.currentVisibleScrollableRows,
                         );
                     }
-                } catch (err) {
-                    logDebug("lazy-refresh-error:", err);
-                }
+                  } catch (err) {
+                      logError("lazy-refresh-error:", err);
+                  }
             }
 
             // Second pass: dispatch non-wheel packets with fresh ranges.
